@@ -155,7 +155,6 @@ class AxiBasicDB:
         """
         from sem_funcs import lagrange_interpol_2D_td
         nt = self.nt 
-        nglob = self.nglob 
         ngll = self.ngll
 
         # allocate space
@@ -163,9 +162,6 @@ class AxiBasicDB:
 
         # cache element
         utemp = np.zeros((nt,ngll,ngll,3),dtype=float,order='F')
-
-        # keys for cached field
-        name = ncfile + "_" + str(elemid)
 
         # connectivity 
         ibool = self.ibool[elemid,:,:]
@@ -225,9 +221,6 @@ class AxiBasicDB:
 
         # cache element
         utemp = np.zeros((nt,ngll,ngll,3),dtype=float,order='F')
-
-        # keys for cached field
-        name = ncfile + "_" + str(elemid)
 
         # connectivity 
         ibool = self.ibool[elemid,:,:]
@@ -296,15 +289,16 @@ class AxiBasicDB:
         """
         from sem_funcs import lagrange_interpol_2D_td,strain_td
         nt = self.nt 
-        nglob = self.nglob 
         ngll = self.ngll
 
         # get source type
+        ncfile_org = ' '.join(ncfile.split("axisem_fields.h5")[:-1]) + "/axisem_output.nc4"
+        fio = h5py.File(ncfile_org,"r")
         stype = fio.attrs['excitation type'].decode("utf-8")
+        fio.close()
+    
+        # cache element
         utemp = np.zeros((nt,ngll,ngll,3),dtype=float,order='F')
-
-        # keys for cached field
-        name = ncfile + "_" + str(elemid)
 
         # connectivity 
         ibool = self.ibool[elemid,:,:]
@@ -381,7 +375,7 @@ class AxiBasicDB:
         
         return sigma
 
-    def compute_tp_recv(self,stla,stlo):
+    def compute_recv_info(self,stla,stlo):
         """
         compute theta and phi for source centered coordinates
         stla: float
@@ -404,6 +398,21 @@ class AxiBasicDB:
         phi = np.arctan2(y1,x1)
 
         return theta,phi
+    
+    def compute_local(self,theta,stel):
+        """
+        compute local coordinates in axisem system
+        theta float
+            epicenter distance, in rad
+        stel: float
+            elevation of the station, in m 
+        """
+        # locate point 
+        r = 6371000 + stel
+        sr = r * np.sin(theta)
+        zr = r * np.cos(theta)
+
+        return sr,zr
 
     def syn_seismo(self,simu_path,stla,stlo,stel,comp:str='enz',cmtfile=None,forcevec=None):
         """
@@ -435,11 +444,7 @@ class AxiBasicDB:
 
         # compute rotated station phi,theta
         theta,phi = self.compute_tp_recv(stla,stlo)
-
-        # locate point 
-        r = 6371000 + stel
-        sr = r * np.sin(theta)
-        zr = r * np.cos(theta)
+        sr,zr = self.compute_local(theta,stel)
 
         # locate element
         elemid,xi,eta = self._locate_elem(sr,zr)
@@ -532,13 +537,17 @@ class AxiBasicDB:
 
         # compute rotated station phi,theta
         theta,phi = self.compute_tp_recv(stla,stlo)
+        sr,zr = self.compute_local(theta,stel)
+        
+        # locate element
+        elemid,xi,eta = self._locate_elem(sr,zr)
 
         # loop every source type
         for stype in srctypes:
             #print("synthetic strain tensor for  ... %s" %(stype))
             # get basic waveform
             filename = simu_path + "/" + stype + "/Data/axisem_fields.h5"
-            eps0 = self._get_strain(stel,theta,filename)
+            eps0 = self._get_strain(elemid,xi,eta,filename)
 
             # parameters
             a = 0.; b = 0.
@@ -603,13 +612,17 @@ class AxiBasicDB:
 
         # compute rotated station phi,theta
         theta,phi = self.compute_tp_recv(stla,stlo)
+        sr,zr = self.compute_local(theta,stel)
+        
+        # locate element
+        elemid,xi,eta = self._locate_elem(sr,zr)
 
         # loop every source type
         for stype in srctypes:
             #print("synthetic strain tensor for  ... %s" %(stype))
             # get basic waveform
             filename = simu_path + "/" + stype + "/Data/axisem_fields.h5"
-            eps0 = self._get_stress(stel,theta,filename)
+            eps0 = self._get_stress(elemid,xi,eta,filename)
 
             # parameters
             a = 0.; b = 0.
