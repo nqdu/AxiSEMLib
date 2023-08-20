@@ -1,2 +1,2 @@
 # axisem_lib
-library for axisem
+library for axisem database.
