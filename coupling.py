@@ -24,14 +24,49 @@ def diff1(u,dt):
 
     return u1
 
+def get_trac_proc(args):
+    iproc,basedir = args
+
+    datadir = '../DATABASES_MPI/'
+    filename1 = datadir + "proc%06d_wavefield_discontinuity_faces"%iproc
+    f = h5py.File("output/traction_proc%06d.h5"%(iproc),"w")
+    if os.path.getsize(filename1) == 0:
+        f.close()
+        return 0
+
+    # read database
+    db = AxiBasicDB(basedir + "/MZZ/Data/axisem_output.nc4")
+
+    data = np.loadtxt(filename1,ndmin=2)
+    r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
+    stel = -6371000 + r
+
+    # create dataset
+    dset = f.create_dataset("field",(db.nt,len(r),3),dtype=np.float32)
+
+    for ir in range(len(r)):
+        print(f"synthetic traction for point {ir+1} in proc {iproc} ...")
+        sig_xyz = db.syn_stress(basedir,stla[ir],stlo[ir],stel[ir],'CMTSOLUTION')
+
+        # compute traction
+        nx,ny,nz = data[ir,3:6]
+        Tx = sig_xyz[0,:] * nx + sig_xyz[5,:] * ny + sig_xyz[4,:] * nz 
+        Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz
+        Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz 
+
+        # save to hdf5 file
+        dset[:,ir,0] = Tx
+        dset[:,ir,1] = Ty
+        dset[:,ir,2] = Tz 
+    
+    f.close()
+
 def get_displ_proc(args):
     iproc,basedir = args 
 
     datadir = '../DATABASES_MPI/'
     filename1 = datadir + "proc%06d_wavefield_discontinuity_points"%iproc
-
-    # create h5 file 
-    f = h5py.File("output/displ_proc%06d.h5"%(iproc),"w")
+    f = h5py.File("output/traction_proc%06d.h5"%(iproc),"w")
     if os.path.getsize(filename1) == 0:
         f.close()
         return 0
@@ -44,42 +79,14 @@ def get_displ_proc(args):
     stel = -6371000 + r
 
     # create dataset
-    dset = f.create_dataset("field",(db.nt,len(r),6))
+    dset = f.create_dataset("field",(db.nt,len(r),6),dtype=np.float32)
 
     for ir in range(len(r)):
-        print(f"synthetic for point {ir+1} in proc {iproc} ...")
+        print(f"synthetic displ/accel for point {ir+1} in proc {iproc} ...")
         ux,uy,uz = db.syn_seismo(basedir,stla[ir],stlo[ir],stel[ir],'xyz','CMTSOLUTION')
         ax = diff1(diff1(ux,db.dtsamp),db.dtsamp); 
         ay = diff1(diff1(uy,db.dtsamp),db.dtsamp); 
         az = diff1(diff1(uz,db.dtsamp),db.dtsamp); 
-
-        # save to hdf5 file
-        dset[:,ir,0] = ux 
-        dset[:,ir,1] = uy 
-        dset[:,ir,2] = uz 
-        dset[:,ir,3] = ax 
-        dset[:,ir,4] = ay 
-        dset[:,ir,5] = az 
-    
-    f.close()
-
-    # create h5 file 
-    filename1 = datadir + "proc%06d_wavefield_discontinuity_faces"%iproc
-    f = h5py.File("output/traction_proc%06d.h5"%(iproc),"w")
-    if os.path.getsize(filename1) == 0:
-        f.close()
-        return 0
-
-    data = np.loadtxt(filename1,ndmin=2)
-    r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
-    stel = -6371000 + r
-
-    # create dataset
-    dset = f.create_dataset("field",(db.nt,len(r),3))
-
-    for ir in range(len(r)):
-        print(f"synthetic for point {ir+1} in proc {iproc} ...")
-        sig_xyz = db.syn_stress(basedir,stla[ir],stlo[ir],stel[ir],'xyz','CMTSOLUTION')
 
         # save to hdf5 file
         dset[:,ir,0] = ux 
@@ -98,9 +105,13 @@ def main():
     args = []
     for i in range(nprocs):
         args.append((i,basedir))
-        if i == 15: break 
     
     # map 
+    pool = Pool(40)
+    pool.map(get_trac_proc,args)
+    pool.close()
+    pool.join()
+
     pool = Pool(40)
     pool.map(get_displ_proc,args)
     pool.close()

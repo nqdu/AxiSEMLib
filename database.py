@@ -18,7 +18,7 @@ def rotation_matrix(colat,lon):
 
 @jit(nopython=True)
 def rotate_tensor2(eps,R):
-    eps_xyz = np.zeros(eps.shape,dtype=float)
+    eps_xyz = np.zeros(eps.shape,dtype=np.float64)
 
     # voigt notation 
     vid = np.array([[0,5,4],[5,1,3],[4,3,2]])
@@ -344,8 +344,9 @@ class AxiBasicDB:
         skel = np.zeros((4,2))
         ctrl_id = self.skelid[elemid,:4]
         eltype = self.eltype[elemid]
-        skel[:,0] = self.s[ctrl_id]
-        skel[:,1] = self.z[ctrl_id]
+        for i in range(4):
+            skel[i,0] = self.s[ctrl_id[i]]
+            skel[i,1] = self.z[ctrl_id[i]]
 
         if self.axis[elemid]:
             G = self.G2 
@@ -375,7 +376,7 @@ class AxiBasicDB:
         
         return sigma
 
-    def compute_recv_info(self,stla,stlo):
+    def compute_tp_recv(self,stla,stlo):
         """
         compute theta and phi for source centered coordinates
         stla: float
