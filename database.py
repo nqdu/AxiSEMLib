@@ -30,7 +30,7 @@ def rotate_tensor2(eps,R):
                 for n in range(3):
                     id1 = vid[m,n]
                     eps_xyz[id,...] += R[p,m] * eps[id1,...] * R[q,n]
-    
+    eps_xyz[3:,...] *= 0.5
     return eps_xyz
 
 class AxiBasicDB:
