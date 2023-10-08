@@ -2,6 +2,8 @@
 #include <iostream>
 #include <hdf5.h>
 
+const double sizeinGB = 10.; // memory usage in each proc
+
 void allocate_task(int ntasks,int nprocs,int myrank,
                 int &startid,int &endid)
 {
@@ -93,7 +95,6 @@ write_trans_data(hid_t file_r,hid_t file_w,
     H5Sclose(filespace2);
 
     // max memory usage
-    const double sizeinGB = 10.;
     int istart,iend;
     size_t nspec_one = (sizeinGB *1024 *1024 * 1024) / (nt *sizeof(float));
     size_t count = 0;

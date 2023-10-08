@@ -30,7 +30,10 @@ def rotate_tensor2(eps,R):
                 for n in range(3):
                     id1 = vid[m,n]
                     eps_xyz[id,...] += R[p,m] * eps[id1,...] * R[q,n]
+    
+    # divide by 2 for last 3 index
     eps_xyz[3:,...] *= 0.5
+
     return eps_xyz
 
 class AxiBasicDB:
@@ -42,8 +45,12 @@ class AxiBasicDB:
         # load library
         from scipy.spatial import KDTree
 
+        # get ncfile_dir
         print("reading database %s ..."%ncfile)
-        self.ncfile_basic = ncfile 
+        for name in ['MZZ',"MXX_P_MYY","MXZ_MYZ","MXY_MXX_M_MYY","PZ","PX"]:
+            if name in ncfile:
+                self.ncfile_dir = ncfile.split(name)[0]
+                break
 
         f = h5py.File(ncfile,"r")
         self.nspec = len(f['Mesh/elements'])
@@ -100,6 +107,19 @@ class AxiBasicDB:
         # elastic moduli
         self.mu = f['Mesh/mesh_mu']
         self.lamda = f['Mesh/mesh_lambda']
+    
+    def set_source(self,evla,evlo):
+        """
+        update source info in the database
+        evla: float
+            latitude of station, in deg
+        evlo: float
+            longitude of station, in deg 
+        """
+        self.evla = evla
+        self.evlo = evlo 
+        self.rot_mat = rotation_matrix(np.pi/2-np.deg2rad(evla),np.deg2rad(evlo))
+        pass
 
     def read_cmt(self,cmtfile):
         from obspy import read_events
@@ -313,7 +333,6 @@ class AxiBasicDB:
             disp_p = fio['disp_p']
         
         # read utemp 
-        
         for iz in range(ngll):
             for ix in range(ngll):
                 iglob = ibool[iz,ix]
@@ -322,7 +341,6 @@ class AxiBasicDB:
                 utemp[:,ix,iz,2] = disp_z[iglob,:]
                 if flag :
                     utemp[:,ix,iz,1] = disp_p[iglob,:]
-                    #disp_p.read_direct(utemp[:,ix,iz,1],idx,np.s_[0:nt])
         fio.close()
 
         # alloc arrays for mu and lambda
@@ -415,7 +433,7 @@ class AxiBasicDB:
 
         return sr,zr
 
-    def syn_seismo(self,simu_path,stla,stlo,stel,comp:str='enz',cmtfile=None,forcevec=None):
+    def syn_seismo(self,stla,stlo,stel,comp:str='enz',cmtfile=None,forcevec=None):
         """
         comp: Specify the orientation of the synthetic seismograms as a list
                 one of [enz,xyz,spz]
@@ -454,7 +472,7 @@ class AxiBasicDB:
         for stype in srctypes:
             #print("synthetic seismograms for  ... %s" %(stype))
             # get basic waveform
-            filename = simu_path + "/" + stype + "/Data/axisem_fields.h5"
+            filename = self.ncfile_dir + "/" + stype + "/Data/axisem_fields.h5"
             us1,up1,uz1 = self._get_displ(elemid,xi,eta,filename)
 
             # parameters
@@ -518,7 +536,7 @@ class AxiBasicDB:
 
         return u1,u2,u3
 
-    def syn_strain(self,simu_path,stla,stlo,stel,cmtfile=None,forcevec=None):
+    def syn_strain(self,stla,stlo,stel,cmtfile=None,forcevec=None):
         # read source type
         assert((cmtfile is not None) or (forcevec is not None))
         mzz,mxx,myy,mxz,myz,mxy = [0. for i in range(6)]
@@ -547,7 +565,7 @@ class AxiBasicDB:
         for stype in srctypes:
             #print("synthetic strain tensor for  ... %s" %(stype))
             # get basic waveform
-            filename = simu_path + "/" + stype + "/Data/axisem_fields.h5"
+            filename = self.ncfile_dir + "/" + stype + "/Data/axisem_fields.h5"
             eps0 = self._get_strain(elemid,xi,eta,filename)
 
             # parameters
@@ -577,6 +595,7 @@ class AxiBasicDB:
                 b = -fx * sinphi + fy * cosphi
 
             # normalize
+            # eps: ss pp zz pz sz sp 
             eps0[0:3,:] *= a; eps0[4,:] *= a
             eps0[3,:] *= b; eps0[5:,:] *= b
             
@@ -592,8 +611,7 @@ class AxiBasicDB:
 
         return eps_xyz
 
-
-    def syn_stress(self,simu_path,stla,stlo,stel,cmtfile=None,forcevec=None):
+    def syn_stress(self,stla,stlo,stel,cmtfile=None,forcevec=None):
         # read source type
         assert((cmtfile is not None) or (forcevec is not None))
         mzz,mxx,myy,mxz,myz,mxy = [0. for i in range(6)]
@@ -622,7 +640,7 @@ class AxiBasicDB:
         for stype in srctypes:
             #print("synthetic strain tensor for  ... %s" %(stype))
             # get basic waveform
-            filename = simu_path + "/" + stype + "/Data/axisem_fields.h5"
+            filename = self.ncfile_dir + "/" + stype + "/Data/axisem_fields.h5"
             eps0 = self._get_stress(elemid,xi,eta,filename)
 
             # parameters
