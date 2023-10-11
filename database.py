@@ -301,7 +301,7 @@ class AxiBasicDB:
 
     def _get_stress(self,elemid,xi,eta,ncfile):
         """
-        get stress field from file
+        get stress field for a given point from file
 
         Returns:
         stress : np.ndarray
@@ -454,7 +454,6 @@ class AxiBasicDB:
         else:
             fx,fy,fz = forcevec
             srctypes = ["PZ","PX","PY"]
-
 
         # alloc space for seismograms
         nt = self.nt 
