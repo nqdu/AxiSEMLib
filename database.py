@@ -52,61 +52,64 @@ class AxiBasicDB:
                 self.ncfile_dir = ncfile.split(name)[0]
                 break
 
-        f = h5py.File(ncfile,"r")
-        self.nspec = len(f['Mesh/elements'])
-        self.nctrl = len(f['Mesh/control_points'])
-        self.ngll = len(f['Mesh/npol'])
+        self.fstream = h5py.File(ncfile,"r")
+        self.nspec = len(self.fstream['Mesh/elements'])
+        self.nctrl = len(self.fstream['Mesh/control_points'])
+        self.ngll = len(self.fstream['Mesh/npol'])
 
         # read attributes
-        self.dtsamp = f.attrs['strain dump sampling rate in sec'][0]
-        self.shift = f.attrs['source shift factor in sec'][0]
-        self.nt = len(f['snapshots'])
-        self.nglob = len(f['gllpoints_all'])
+        self.dtsamp = self.fstream.attrs['strain dump sampling rate in sec'][0]
+        self.shift = self.fstream.attrs['source shift factor in sec'][0]
+        self.nt = len(self.fstream['snapshots'])
+        self.nglob = len(self.fstream['gllpoints_all'])
     
         # read source parameters
-        self.evdp = f.attrs['source depth in km'][0]
-        evcola = f.attrs['Source colatitude'][0]
-        evlo = f.attrs['Source longitude'][0]
+        self.evdp = self.fstream.attrs['source depth in km'][0]
+        evcola = self.fstream.attrs['Source colatitude'][0]
+        evlo = self.fstream.attrs['Source longitude'][0]
         self.evla = 90 - np.rad2deg(evcola) 
         self.evlo = np.rad2deg(evlo)
-        self.mag = f.attrs['scalar source magnitude'][0]
+        self.mag = self.fstream.attrs['scalar source magnitude'][0]
 
         # rotation matrix
         self.rot_mat = rotation_matrix(evcola,evlo)
 
         # read mesh 
-        self.s = f['Mesh/mesh_S']
-        self.z = f['Mesh/mesh_Z']
+        self.s = self.fstream['Mesh/mesh_S']
+        self.z = self.fstream['Mesh/mesh_Z']
 
         # create kdtree
         md_pts = np.zeros((self.nspec,2))
-        md_pts[:,0] = f['Mesh/mp_mesh_S'][:]
-        md_pts[:,1] = f['Mesh/mp_mesh_Z'][:]
+        md_pts[:,0] = self.fstream['Mesh/mp_mesh_S'][:]
+        md_pts[:,1] = self.fstream['Mesh/mp_mesh_Z'][:]
         self.kdtree = KDTree(data=md_pts)
 
         # elemtype
-        self.eltype = f['Mesh/eltype']
-        self.axis = f['Mesh/axis']
+        self.eltype = self.fstream['Mesh/eltype']
+        self.axis = self.fstream['Mesh/axis']
 
         # skeleton
-        self.skelid = f['Mesh/fem_mesh']
+        self.skelid = self.fstream['Mesh/fem_mesh']
 
         # connectivity
-        self.ibool = f['Mesh/sem_mesh']
+        self.ibool = self.fstream['Mesh/sem_mesh']
 
         # other useful arrays
-        self.G0 = f['Mesh/G0'][:]
-        self.G1 = f['Mesh/G1'][:].T
-        self.G2 = f['Mesh/G2'][:].T 
+        self.G0 = self.fstream['Mesh/G0'][:]
+        self.G1 = self.fstream['Mesh/G1'][:].T
+        self.G2 = self.fstream['Mesh/G2'][:].T 
         self.G1T = np.require(self.G1.T,requirements=['F_CONTIGUOUS'])
         self.G2T = np.require(self.G2.T,requirements=['F_CONTIGUOUS'])
 
-        self.gll = f['Mesh/gll'][:]
-        self.glj = f['Mesh/glj'][:]
+        self.gll = self.fstream['Mesh/gll'][:]
+        self.glj = self.fstream['Mesh/glj'][:]
 
         # elastic moduli
-        self.mu = f['Mesh/mesh_mu']
-        self.lamda = f['Mesh/mesh_lambda']
+        self.mu = self.fstream['Mesh/mesh_mu']
+        self.lamda = self.fstream['Mesh/mesh_lambda']
+    
+    def __del__(self):
+        self.fstream.close()
     
     def set_source(self,evla,evlo):
         """
