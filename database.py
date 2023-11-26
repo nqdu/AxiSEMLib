@@ -108,7 +108,7 @@ class AxiBasicDB:
         self.mu = self.fstream['Mesh/mesh_mu']
         self.lamda = self.fstream['Mesh/mesh_lambda']
     
-    def __del__(self):
+    def close(self):
         self.fstream.close()
     
     def set_source(self,evla,evlo):
@@ -418,6 +418,8 @@ class AxiBasicDB:
         #r = np.sqrt(x1**2 + y1**2)
         theta = np.arccos(z1/r)
         phi = np.arctan2(y1,x1)
+        if phi < 0:
+            phi = np.pi - phi
 
         return theta,phi
     
