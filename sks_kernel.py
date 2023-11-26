@@ -2,6 +2,7 @@ from database import AxiBasicDB,rotation_matrix,rotate_tensor2
 import numpy as np 
 import matplotlib.pyplot as plt 
 import os 
+#import cProfile
 
 def cart2sph(x,y,z):
     XsqPlusYsq = x**2 + y**2
@@ -96,9 +97,9 @@ def get_sgt(db:AxiBasicDB,lat,lon,depth):
     # now the strain is in computation coordinates, we rotate it to local coordinates at this point
     R1 = Rr.T @ db.rot_mat @ R1
     for i in range(3):
-        eps_out[i,...] = rotate_tensor2(eps_out[i,...],R1)
+        eps_out[i,...] = rotate_tensor2(eps_out[i,...],R1) # 6 -> (xr,yr,zr)
     
-    return eps_out
+    return elemid,xi,eta,eps_out
 
 def compute_sks_kl(db:AxiBasicDB,dbdiff:AxiBasicDB,db0:AxiBasicDB,
                    xs,xr,x,cmtfile='CMTSOLUTION'):
@@ -119,7 +120,6 @@ def compute_sks_kl(db:AxiBasicDB,dbdiff:AxiBasicDB,db0:AxiBasicDB,
     """
     # load libs 
     from sem_funcs import lagrange_interpol_2D_td
-    from obspy.geodetics import gps2dist_azimuth
 
     # extract coordinates
     evlo,evla,evdp = xs 
@@ -127,25 +127,39 @@ def compute_sks_kl(db:AxiBasicDB,dbdiff:AxiBasicDB,db0:AxiBasicDB,
     lon,lat,depth = x 
 
     # check if the depth is the same as source depth in db 
-    assert(abs(db.evdp * 1000 - depth) > 0.1)
+    assert(abs(db.evdp * 1000 - depth) <= 0.1)
     
     # get moment tensor
     mzz,mxx,myy,mxz,myz,mxy = db.read_cmt(cmtfile)
     mij = np.array([mxx,myy,mzz,2 * myz,2 * mxz,2 * mxy])
 
-    # get sgt from r to x
+    # compute rotated station backazimuth
     db0.set_source(stla,stlo)
-    sgt_xr = get_sgt(db0,lat,lon,depth)
+    _,baz = db0.compute_tp_recv(lat,lon)
+    if baz < np.pi:
+        baz = np.pi - baz
+
+    # get sgt from receiver to x
+    elemid,xi,eta,sgt_xr = get_sgt(db0,lat,lon,depth) # 3 -> (xr,yr,zr) 6 -> (t,p,r)
     nt = sgt_xr.shape[-1]
+    
+    # only keep T component
+    ETxr =  sgt_xr[0,...] * np.sin(baz) + sgt_xr[1,...] * np.cos(baz)
 
     # rotation matrix from s to x
     RxT = rotation_matrix(np.deg2rad(90-lat),np.deg2rad(lon)).T
     Rs = rotation_matrix(np.deg2rad(90-evla),np.deg2rad(evlo))
     Rs = RxT @ Rs 
 
+    # synthetic phi field
+    db.set_source(lat,lon)
+    _,_,_,sgt_sx1 = get_sgt(db,evla,evlo,evdp)
+    data1 = np.einsum('ijk,j',sgt_sx1,mij)
+    data1 = RxT.T @ data1 
+
     # compute disp_grad from x to s
     dx = 500
-    Esx = np.zeros((3,3,nt)) # u_{k,l}(t)
+    Esx = np.zeros((3,3,nt),dtype=np.float32) # u_{k,l}(t)
     x0 = np.array(sph2cart(x[0],x[1],6371000 - x[1])) # to cartesian
     for k in range(2): # only for lon/lat
         # synthetic seismograms for (x + dx/2)
@@ -155,89 +169,72 @@ def compute_sks_kl(db:AxiBasicDB,dbdiff:AxiBasicDB,db0:AxiBasicDB,
         lon1,lat1,_ = xtemp 
         db.set_source(lat1,lon1)
         Rx1 = rotation_matrix(np.deg2rad(90-lat1),np.deg2rad(lon1))
-        sgt_sx1 = get_sgt(db,evla,evlo,evdp)
-        data1 = np.einsum('ijk,j',sgt_sx1,mij)
-        data1 = Rx1 @ data1 # rotate to xyz coordinates
-
-        # synthetic seismograms for (x - dx/2)
-        x1[k] = x0[k] - dx
-        xtemp = np.array(cart2sph(x1[0],x1[1],x1[2]))
-        lon1,lat1,_ = xtemp 
-        db.set_source(lat1,lon1)
-        Rx1 = rotation_matrix(np.deg2rad(90-lat1),np.deg2rad(lon1))
-        sgt_sx1 = get_sgt(db,evla,evlo,evdp)
-        data2 = np.einsum('ijk,j',sgt_sx1,mij)
+        _,_,_,sgt_sx2 = get_sgt(db,evla,evlo,evdp) # 3-> (x+dx local) 6-> (xs,ys,zs)
+        data2 = np.einsum('ijk,j',sgt_sx2,mij)
         data2 = Rx1 @ data2 # rotate to xyz coordinates
-        
-        Esx[k,:,:] = 0.5 * (data1 - data2) / dx
+
+        Esx[k,:,:] = (data2 - data1) / dx
     
     # for depth
-    db.set_source(lat,lon)
-    sgt_sx1 = get_sgt(db,evla,evlo,evdp)
-    data1 = np.einsum('ijk,j',sgt_sx1,mij)
-    data1 = RxT.T @ data1 
     dbdiff.set_source(lat,lon)
-    sgt_sx1 = get_sgt(dbdiff,evla,evlo,evdp)
-    data2 = np.einsum('ijk,j',sgt_sx1,mij)
+    _,_,_,sgt_sx2 = get_sgt(dbdiff,evla,evlo,evdp)
+    data2 = np.einsum('ijk,j',sgt_sx2,mij)
     data2 = RxT.T @ data1 
     dx = (db.evdp - dbdiff.evdp) * 1000
     Esx[2,:,:] = (data1 - data2) / dx
 
     # covert displ_grad to strain
     Esx = 0.5 * (Esx + np.transpose(Esx,(1,0,2)))
-    print('haha')
 
     # now Esx is in global cartesian (xyz) coordinates
     # we rotate it to local coordinates of x 
     Esx = RxT @ Esx
     Esx = np.einsum('ik,jkl',RxT,Esx)
 
+    # integrate to get heaviside response
+    Esx = np.cumsum(Esx,axis=-1) * db.dtsamp
+
     # get elastic parameters
-    # compute rotated station phi,theta
-    theta,_ = db0.compute_tp_recv(lat,lon)
-    sr,zr = db0.compute_local(theta,-depth)
-    elemid,xi,eta = db0._locate_elem(sr,zr)
     ngll = db0.ngll
     xmu = np.zeros((1,db0.ngll,db0.ngll),dtype=float,order='F')
-    xlam = np.zeros((1,db0.ngll,db0.ngll),dtype=float,order='F')
+    xrho = np.zeros((1,db0.ngll,db0.ngll),dtype=float,order='F')
     for iz in range(ngll):
         for ix in range(ngll):
             iglob = db0.ibool[elemid,iz,ix]
             xmu[0,ix,iz] = db0.mu[iglob]
-            xlam[0,ix,iz] = db0.lamda[iglob]
+            xrho[0,ix,iz] = db0.rho[iglob]
+
     # gll/glj array
     sgll = db0.gll
     zgll = db0.gll 
     if db0.axis[elemid]:
         sgll = db0.glj 
     mu = lagrange_interpol_2D_td(sgll,zgll,xmu,xi,eta)[0]
-    lamb = lagrange_interpol_2D_td(sgll,zgll,xlam,xi,eta)[0]
+    rho = lagrange_interpol_2D_td(sgll,zgll,xrho,xi,eta)[0]
 
-    # compute dun, note that Esx(3,3,nt) sgt_xr(3,6,nt)
-    k1 = 2. *(Esx[0,0,:] + Esx[1,1,:] + Esx[2,2,:]) * sgt_xr[:,0,:] # sgt shape(3,6,nt)
-    k2 = 2. * np.sum(sgt_xr[:,:3,:],axis=1) * Esx[0,0,:]
-    k3 = 4. * (sgt_xr[:,0,:] * Esx[0,0,:] + sgt_xr[:,5,:] * Esx[1,0,:] + 
-               sgt_xr[:,4,:] * Esx[2,0,:])
-    dun = 2 * mu * (k1 + k2 - k3) # shape(3,nt)
-
-    # compute T component du_T 
-    phi = gps2dist_azimuth(evla,evlo,stla,stlo,6371000.,0.0)[1]
-    phi = np.deg2rad(phi)
-    duT = dun[0,:] * np.sin(phi) + dun[1,:] * np.cos(phi)
+    # compute dun, note that Esx(3,3,nt) ETxr(6,nt)
+    # ETxr: tt,pp,rr,rp,rt,tp
+    # [(hrog - hoo)* Hrrpg - 2(hrro * Hrpg - hrr* Hrpg)]
+    k_gc = (ETxr[0,:] - ETxr[1,:]) * Esx[2,2,:] - 2. * (
+            ETxr[4,:] * Esx[2,0,:] - ETxr[3,:] * Esx[2,1,:])
+    k_gc = -k_gc * 2. * mu 
+    k_gs = ETxr[5,:] * Esx[2,2,:] - ETxr[4,:] * Esx[2,1,:] - ETxr[3,:] * Esx[2,0,:]
+    k_gs = k_gs * 4 * mu
 
     # integral
     #duT = np.cumsum(duT) * db.dtsamp
-    return duT
+    return k_gc,k_gs
 
 def main():
     # read db of single force 
-    datadir = '/mnt/d/prem_aniso_10_crust_100/'
-    datadir0 = '/mnt/d/prem_aniso_10_crust_0/'
+    basedir = '/home/nqdu/scratch/axisem/SOLVER/'
+    datadir = basedir + '/prem_10s_100/'
+    datadir0 = basedir + '/prem_10s_0/'
     db = AxiBasicDB(datadir + "/PZ/Data/axisem_output.nc4")
     db0 = AxiBasicDB(datadir0 + "/PZ/Data/axisem_output.nc4")
 
     # get all depth for source
-    filenames = os.listdir('/mnt/d/')
+    filenames = os.listdir(basedir)
     src_depth = []
     for f in filenames:
         if 'prem' not in f:continue
@@ -253,16 +250,17 @@ def main():
     z0 = 100
     x = np.array([45.,125.,z0 * 1000])
     idx = np.argsort(abs(z0-src_depth))
-    datadir_diff = '/mnt/d/prem_aniso_10_crust_' + str(src_depth[idx[1]]) + "/"
+    datadir_diff = basedir + '/prem_10s_' + str(src_depth[idx[1]]) + "/"
     dbdiff = AxiBasicDB(datadir_diff + "/PZ/Data/axisem_output.nc4")
-    print(db.evdp,dbdiff.evdp)
 
     # compute
-    duT = compute_sks_kl(db,dbdiff,db0,xs,xr,x)
+    #with cProfile.Profile() as pr:
+    k_gc,k_gs = compute_sks_kl(db,dbdiff,db0,xs,xr,x)
+    #    pr.print_stats('cumtime')
     t = np.arange(db.nt) * db.dtsamp - db.shift
 
-    plt.plot(t,duT)
-    plt.show()
+    plt.plot(t,k_gc)
+    plt.savefig("test.jpg")
 
 
 def main1():

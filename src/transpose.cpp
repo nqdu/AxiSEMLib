@@ -2,7 +2,7 @@
 #include <iostream>
 #include <hdf5.h>
 
-const double sizeinGB = 10.; // memory usage in each proc
+const double sizeinGB = 1.; // memory usage in each proc
 
 void allocate_task(int ntasks,int nprocs,int myrank,
                 int &startid,int &endid)
