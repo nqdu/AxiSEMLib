@@ -22,7 +22,7 @@ def sph2cart(lon,lat,r):
     z = r * np.sin(elevation)
     return x, y, z
 
-def get_sgt(db:AxiBasicDB,lat,lon,depth):
+def get_sgt(db:AxiBasicDB,lat,lon,depth,idx=None):
     """
     compute strain green's tensor at a given location
 
@@ -135,9 +135,10 @@ def compute_sks_kl(db:AxiBasicDB,dbdiff:AxiBasicDB,db0:AxiBasicDB,
 
     # compute rotated station backazimuth
     db0.set_source(stla,stlo)
-    _,baz = db0.compute_tp_recv(lat,lon)
+    theta,baz = db0.compute_tp_recv(lat,lon)
     if baz < np.pi:
         baz = np.pi - baz
+    print(np.rad2deg(theta))
 
     # get sgt from receiver to x
     elemid,xi,eta,sgt_xr = get_sgt(db0,lat,lon,depth) # 3 -> (xr,yr,zr) 6 -> (t,p,r)
@@ -154,26 +155,25 @@ def compute_sks_kl(db:AxiBasicDB,dbdiff:AxiBasicDB,db0:AxiBasicDB,
     # synthetic phi field
     db.set_source(lat,lon)
     _,_,_,sgt_sx1 = get_sgt(db,evla,evlo,evdp)
-    data1 = np.einsum('ijk,j',sgt_sx1,mij)
-    data1 = RxT.T @ data1 
+    data1 = np.einsum('ijk,j',sgt_sx1,mij) # data1 in (t,p,r)
 
-    # compute disp_grad from x to s
-    dx = 500
-    Esx = np.zeros((3,3,nt),dtype=np.float32) # u_{k,l}(t)
-    x0 = np.array(sph2cart(x[0],x[1],6371000 - x[1])) # to cartesian
-    for k in range(2): # only for lon/lat
+    # compute derivative at t,p,r
+    dx = 0.01 # 0.01 degree
+    Esx = np.zeros((6,nt),dtype=np.float32) # E_{k,l}(t)
+    E = np.zeros((3,3,nt),dtype=np.float32) # u_{k,l}(t), without christoffel symbol
+    x0 = np.array([lat,lon])
+    for k in range(2): # only for lat/lon
         # synthetic seismograms for (x + dx/2)
         x1 = x0 * 1.
         x1[k] = x0[k] + dx
-        xtemp = np.array(cart2sph(x1[0],x1[1],x1[2]))
-        lon1,lat1,_ = xtemp 
+        lat1,lon1 = x1
         db.set_source(lat1,lon1)
-        Rx1 = rotation_matrix(np.deg2rad(90-lat1),np.deg2rad(lon1))
+        #Rx1 = rotation_matrix(np.deg2rad(90-lat1),np.deg2rad(lon1))
         _,_,_,sgt_sx2 = get_sgt(db,evla,evlo,evdp) # 3-> (x+dx local) 6-> (xs,ys,zs)
         data2 = np.einsum('ijk,j',sgt_sx2,mij)
-        data2 = Rx1 @ data2 # rotate to xyz coordinates
-
-        Esx[k,:,:] = (data2 - data1) / dx
+        #data2 = Rx1 @ data2 # rotate to xyz coordinates
+        E[k,:,:] = (data2 - data1) / dx * 180 / np.pi 
+    E[0,...] = - E[0,...] # dE / dtheta
     
     # for depth
     dbdiff.set_source(lat,lon)
@@ -181,23 +181,30 @@ def compute_sks_kl(db:AxiBasicDB,dbdiff:AxiBasicDB,db0:AxiBasicDB,
     data2 = np.einsum('ijk,j',sgt_sx2,mij)
     data2 = RxT.T @ data1 
     dx = (db.evdp - dbdiff.evdp) * 1000
-    Esx[2,:,:] = (data1 - data2) / dx
+    E[2,:,:] = -(data1 - data2) / dx # dr = -ddepth
 
     # covert displ_grad to strain
-    Esx = 0.5 * (Esx + np.transpose(Esx,(1,0,2)))
-
-    # now Esx is in global cartesian (xyz) coordinates
-    # we rotate it to local coordinates of x 
-    Esx = RxT @ Esx
-    Esx = np.einsum('ik,jkl',RxT,Esx)
+    # Dahlen and Tromp 1998, A139
+    # E_{i,j} = du_j / dx_i
+    # now Esx is in local coordinates of x 
+    csctheta = 1. / np.cos(np.deg2rad(lat))
+    cottheta = 1. / np.tan(np.deg2rad(90 - lat))
+    rinv = 1. / (6371000 - depth)
+    Esx[0,:] = rinv * (data1[2,:] + E[0,0,:])  # E_{t,t}
+    Esx[1,:] = rinv * (csctheta * E[1,1,:] + data1[2,:] + data1[0,:] * cottheta)  # E_{p,p}
+    Esx[2,:] = E[2,2,:] # u_{r,r}
+    Esx[3,:] = E[2,1,:] + rinv * (E[1,2,:] * csctheta - data1[1,:]) # E_{r,p}
+    Esx[4,:] = E[2,0,:] + rinv * (E[0,2,:] - data1[0,:]) # E_{r,t}
+    Esx[5,:] = rinv * (E[0,1,:] + csctheta * E[1,0,:] - data1[1,:] * cottheta) # E_{t,p}
+    Esx[3:,:] *= 0.5 
 
     # integrate to get heaviside response
     Esx = np.cumsum(Esx,axis=-1) * db.dtsamp
 
     # get elastic parameters
     ngll = db0.ngll
-    xmu = np.zeros((1,db0.ngll,db0.ngll),dtype=float,order='F')
-    xrho = np.zeros((1,db0.ngll,db0.ngll),dtype=float,order='F')
+    xmu = np.zeros((1,db0.ngll,db0.ngll),dtype='f4',order='F')
+    xrho = np.zeros((1,db0.ngll,db0.ngll),dtype='f4',order='F')
     for iz in range(ngll):
         for ix in range(ngll):
             iglob = db0.ibool[elemid,iz,ix]
@@ -213,22 +220,22 @@ def compute_sks_kl(db:AxiBasicDB,dbdiff:AxiBasicDB,db0:AxiBasicDB,
     rho = lagrange_interpol_2D_td(sgll,zgll,xrho,xi,eta)[0]
 
     # compute dun, note that Esx(3,3,nt) ETxr(6,nt)
-    # ETxr: tt,pp,rr,rp,rt,tp
+    # ETxr/Esx: tt,pp,rr,rp,rt,tp
     # [(hrog - hoo)* Hrrpg - 2(hrro * Hrpg - hrr* Hrpg)]
-    k_gc = (ETxr[0,:] - ETxr[1,:]) * Esx[2,2,:] - 2. * (
-            ETxr[4,:] * Esx[2,0,:] - ETxr[3,:] * Esx[2,1,:])
+    k_gc = (ETxr[0,:] - ETxr[1,:]) * Esx[2,:] - 2. * (
+            ETxr[4,:] * Esx[4,:] - ETxr[3,:] * Esx[3,:])
     k_gc = -k_gc * 2. * mu 
-    k_gs = ETxr[5,:] * Esx[2,2,:] - ETxr[4,:] * Esx[2,1,:] - ETxr[3,:] * Esx[2,0,:]
+    k_gs = ETxr[5,:] * Esx[2,:] - ETxr[4,:] * Esx[3,:] - ETxr[3,:] * Esx[4,:]
     k_gs = k_gs * 4 * mu
 
     # integral
     #duT = np.cumsum(duT) * db.dtsamp
-    return k_gc,k_gs
+    return k_gc,k_gs,Esx,ETxr
 
 def main():
     # read db of single force 
     basedir = '/home/nqdu/scratch/axisem/SOLVER/'
-    datadir = basedir + '/prem_10s_100/'
+    datadir = basedir + '/prem_10s_0/'
     datadir0 = basedir + '/prem_10s_0/'
     db = AxiBasicDB(datadir + "/PZ/Data/axisem_output.nc4")
     db0 = AxiBasicDB(datadir0 + "/PZ/Data/axisem_output.nc4")
@@ -243,23 +250,36 @@ def main():
     src_depth = np.sort(src_depth)
 
     # station and events
-    xs = np.array([178.48,-26.04,552000])
+    #xs = np.array([178.48,-26.04,552000])
     xr = np.array([122.629,43.3034,0.])
+    xs = np.array([82.629,43.3034,0.])
 
     # 35-55 115-135 0.5°
-    z0 = 100
-    x = np.array([45.,125.,z0 * 1000])
+    z0 = 0
+    #x = np.array([45.,125.,z0 * 1000])
+    x =np.array([82.629,43.3034,z0 * 1000]) 
     idx = np.argsort(abs(z0-src_depth))
     datadir_diff = basedir + '/prem_10s_' + str(src_depth[idx[1]]) + "/"
     dbdiff = AxiBasicDB(datadir_diff + "/PZ/Data/axisem_output.nc4")
 
     # compute
     #with cProfile.Profile() as pr:
-    k_gc,k_gs = compute_sks_kl(db,dbdiff,db0,xs,xr,x)
+    #k_gc,k_gs,Esx,ETxr = compute_sks_kl(db,dbdiff,db0,xs,xr,x)
+    db0.set_source(xr[1],xr[0])
+    _,_,_,sgt_xr = get_sgt(db0,x[1],x[0],x[-1])
     #    pr.print_stats('cumtime')
-    t = np.arange(db.nt) * db.dtsamp - db.shift
+    #t = np.arange(db.nt) * db.dtsamp - db.shift
+    t = np.arange(db.nt) * db.dtsamp
+    idx = np.logical_and(t > 300,t < 1500)
 
-    plt.plot(t,k_gc)
+    # filter
+    from scipy.signal import butter,sosfiltfilt
+    freqmin = 0.002; freqmax = 0.08
+    sos = butter(4,[freqmin,freqmax],btype='bandpass',output='sos',fs=1. / db.dtsamp)
+    data = sosfiltfilt(sos,sgt_xr[2,2,:])
+
+    plt.figure(1,figsize=(14,4))
+    plt.plot(t[idx],data[idx])
     plt.savefig("test.jpg")
 
 
