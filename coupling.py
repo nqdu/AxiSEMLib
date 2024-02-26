@@ -28,26 +28,31 @@ def diff1(u,dt):
     return u1
 
 def get_trac_proc(args):
-    iproc,basedir,coordir,outdir,t1 = args
+    iproc,basedir,coordir,outdir,tvec = args
     datadir = coordir
     filename1 = datadir + "proc%06d_wavefield_discontinuity_faces"%iproc
     outbin = "%s/proc%06d_traction.bin"%(outdir,iproc)
-    f = h5py.File("%s/traction_proc%06d.h5"%(outdir,iproc),"w")
     if os.path.getsize(filename1) == 0:
-        f.close()
         os.system(":> %s"%outbin)
         return 0
+    f = h5py.File("%s/traction_proc%06d.h5"%(outdir,iproc),"w")
 
     # read database
-    db = AxiBasicDB(basedir + "/MZZ/Data/axisem_output.nc4")
+    db = AxiBasicDB()
+    db.read_basic(basedir + "/MZZ/Data/axisem_output.nc4")
+    db.set_iodata(basedir)
 
     data = np.loadtxt(filename1,ndmin=2)
     r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
     stel = -6371000 + r
 
     # create dataset
-    nt1 = len(t1)
     t0 = np.arange(db.nt) * db.dtsamp - db.shift
+    if tvec is None:
+        t1 = np.arange(20000) * 0.05 - db.shift 
+    else:
+        t1 = tvec
+    nt1 = len(t1)
     dset = f.create_dataset("field",(nt1,len(r),3),dtype=np.float32,chunks=True)
     field = np.zeros((nt1,3),dtype=np.float32)
 
@@ -55,7 +60,7 @@ def get_trac_proc(args):
 
     for ir in range(len(stla)):
         #print(f"synthetic traction for point {ir+1} in proc {iproc} ...")
-        sig_xyz = db.syn_stress(basedir,stla[ir],stlo[ir],stel[ir],'CMTSOLUTION')
+        sig_xyz = db.syn_stress(stla[ir],stlo[ir],stel[ir],basedir + '/CMTSOLUTION')
         Tx = np.zeros((db.nt)); Ty = Tx *  1.; Tz = Tx * 1. 
 
         nx = data[ir,3]; ny = data[ir,4]; nz = data[ir,5]
@@ -74,39 +79,47 @@ def get_trac_proc(args):
 
     # create binary 
     os.system("h5dump -d 'field' -b LE -o %s %s/traction_proc%06d.h5" %(outbin,outdir,iproc))
+    os.remove("%s/traction_proc%06d.h5"%(outdir,iproc))
 
 def get_displ_proc(args):
-    iproc,basedir,coordir,outdir,t1 = args 
+    iproc,basedir,coordir,outdir,tvec = args 
     datadir = coordir
     
     filename1 = datadir + "proc%06d_wavefield_discontinuity_points"%iproc
-    f = h5py.File("%s/displ_proc%06d.h5"%(outdir,iproc),"w")
+    
     outbin = "%s/proc%06d_displ.bin"%(outdir,iproc)
     if os.path.getsize(filename1) == 0:
-        f.close()
         os.system(f":> {outbin}")
         return 0
+    f = h5py.File("%s/displ_proc%06d.h5"%(outdir,iproc),"w")
     
     # read database
-    db = AxiBasicDB(basedir + "/MZZ/Data/axisem_output.nc4")
+    db = AxiBasicDB()
+    db.read_basic(basedir + "/MZZ/Data/axisem_output.nc4")
+    db.set_iodata(basedir)
     
     data = np.loadtxt(filename1,ndmin=2)
     r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
     stel = -6371000 + r
 
     # create dataset
+    t0 = np.arange(db.nt) * db.dtsamp - db.shift
+    if tvec is None:
+        t1 = np.arange(20000) * 0.05 - db.shift 
+    else:
+        t1 = tvec
     nt1 = len(t1)
     dt1 = t1[1] - t1[0]
     dset = f.create_dataset("field",(nt1,len(r),6),dtype=np.float32,chunks=True)
 
     # allocate space
     field = np.zeros((nt1,6))
-    t0 = np.arange(db.nt) * db.dtsamp - db.shift
+    
     if iproc == 0: print("synthetic displ/accel ...")
 
     for ir in range(len(stla)):
         #print(f"synthetic displ/accel for point {ir+1} in proc {iproc} ...")
-        ux1,uy1,uz1 = db.syn_seismo(basedir,stla[ir],stlo[ir],stel[ir],'xyz','CMTSOLUTION')
+        ux1,uy1,uz1 = db.syn_seismo(stla[ir],stlo[ir],stel[ir],'xyz',basedir + '/CMTSOLUTION')
 
         field[:,0] = interp1d(t0,ux1,bounds_error=False,fill_value=0.)(t1)
         field[:,1] = interp1d(t0,uy1,bounds_error=False,fill_value=0.)(t1)
@@ -120,6 +133,7 @@ def get_displ_proc(args):
     
     f.close()
     os.system(f"h5dump -d 'field' -b LE -o {outbin} {outdir}/displ_proc%06d.h5"%iproc)
+    os.remove(f"{outdir}/displ_proc%06d.h5"%(iproc))
 
 def allocate_task(ntasks,nprocs,myrank):
     sub_n = ntasks // nprocs
@@ -187,6 +201,7 @@ def main():
 
     # time window
     t1 = get_time_window(basedir,phase,tb,te)
+    #t1 = np.arange(72000) * 0.05
 
     #basedir = '/home/l/liuqy/nqdu/scratch/axisem/SOLVER/ak135'
     for i in range(startid,endid+1):
