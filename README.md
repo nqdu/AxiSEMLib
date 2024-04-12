@@ -1,5 +1,7 @@
 # AXISEM-SPECFEM3D Coupling Notes
 
+## This is the test version, use manual and examples will be updated later ...
+
 ## step1 : Download axisem-1.4
 Download version 1.4 of [axisem](https://github.com/geodynamics/axisem). 
 
