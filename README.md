@@ -3,7 +3,7 @@
 ## step1 : Download axisem-1.4
 Download version 1.4 of [axisem](https://github.com/geodynamics/axisem). 
 
-If you want to use the fast version, you should substitute `src/nc_routines.F90` in `SOLVER/`.
+If you want to use the fast version, you should substitute `nc_routines.F90` in `axisem/SOLVER/` with that in `src/`.
 
 ## step2: download required software
 1. create a new environment with conda:
@@ -13,7 +13,7 @@ conda activate axisem_lib
 conda install numpy scipy numba mpi4py
 conda install -c conda-forge pybind11  
 ```
-2. You should install [parallel-hdf5](https://support.hdfgroup.org/HDF5/PHDF5/), and [h5py](https://docs.h5py.org/en/stable/mpi.html), [eigen](https://eigen.tuxfamily.org/index.php?title=Main_Page). Then you can change the `EIGEN_INC` in `compile.sh`, and compile this package by :
+2. You should install [parallel-hdf5](https://support.hdfgroup.org/HDF5/PHDF5/), and [h5py](https://docs.h5py.org/en/stable/mpi.html). Then you can change the `EIGEN_INC` in `compile.sh`, and compile this package by :
 ```bash
 bash compie.sh
 ```
