@@ -5,7 +5,7 @@
 ## step1 : Download axisem-1.4
 Download version 1.4 of [axisem](https://github.com/geodynamics/axisem). 
 
-If you want to use the fast version, you should substitute `nc_routines.F90` in `axisem/SOLVER/` with that in `src/`.
+If you want to use the fast version, you should substitute `nc_routines.F90` in `axisem/SOLVER/` with that in `axisem_fast.tar.gz`.
 
 ## step2: download required software
 1. create a new environment with conda:
@@ -41,7 +41,7 @@ Then you can edit several files: `inparam_basic`, `inparam_source`,`CMTSOLUTION`
 
 ## step4: run simulation
 Build axisem with `USE_NETCDF` mode, and run it.
-
+`
 ## step5: Prepare Boundary Points
 your should provide two files `proc*_wavefield_discontinuity_faces` and `proc*_wavefield_discontinuity_points`. The first file is with format: 
 ```bash
