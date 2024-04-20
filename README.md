@@ -3,9 +3,8 @@
 **AxiSEMLib** is a python library that enables several extensional functionalies of the [AxiSEM](https://github.com/geodynamics/axisem):
 
 * Synthesize accurate seismograms/strain/stress at any points of the earth.
-* Teleseismic injection interfaces between **AxiSEM** and [SPECFEM3D](https://github.com/SPECFEM/specfem3d)/[SPECFEM3D-injection][https://github.com/tianshi-liu/specfem3D-injection]
+* Teleseismic injection interfaces between **AxiSEM**, [SPECFEM3D](https://github.com/SPECFEM/specfem3d) and [SPECFEM3D-injection](https://github.com/tianshi-liu/specfem3D-injection)
  
-GMT uses the coast utility to access a version of the GSHHG data specially formatted for GMT. The GSHHG data have strengths and weaknesses. It is global and open source, but is based on relatively old datasets and hence may not be accurate enough for very large-scale mapping projects. The current GSHHG version used by GMT is 2.3.7. Below is a mostly technical description of how the GSHHG data set was assembled, processed, and formatted to meet the requirements of GMT.
 
 ## This is the test version, user manual and examples will be updated later ...
 
