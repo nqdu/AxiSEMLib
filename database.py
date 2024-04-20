@@ -1,40 +1,6 @@
 import numpy as np 
 import h5py 
-from numba import jit 
-
-def rotation_matrix(colat,lon):
-    """
-    get rotation matrix, Tarje 2007 (2.14)
-    """
-    cost = np.cos(colat); sint = np.sin(colat)
-    cosp = np.cos(lon); sinp = np.sin(lon)
-
-    R = np.zeros((3,3))
-    R[0,:] = [cost * cosp, -sinp, sint * cosp]
-    R[1,:] = [cost * sinp, cosp, sint * sinp]
-    R[2,:] = [-sint, 0, cost]
-
-    return R
-
-@jit(nopython=True)
-def rotate_tensor2(eps,R):
-    eps_xyz = np.zeros(eps.shape,dtype=np.float64)
-
-    # voigt notation 
-    vid = np.array([[0,5,4],[5,1,3],[4,3,2]])
-
-    for p in range(3):
-        for q in range(3):
-            id = vid[p,q]
-            for m in range(3):
-                for n in range(3):
-                    id1 = vid[m,n]
-                    eps_xyz[id,...] += R[p,m] * eps[id1,...] * R[q,n]
-    
-    # divide by 2 for last 3 index
-    eps_xyz[3:,...] *= 0.5
-
-    return eps_xyz
+from utils import rotation_matrix,rotate_tensor2
 
 class AxiBasicDB:
     def __init__(self) -> None:

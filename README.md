@@ -15,7 +15,7 @@
 ```bash
 conda create -n axisem_lib python=3.8 
 conda activate axisem_lib
-conda install numpy scipy numba
+conda install numpy scipy numba pyproj
 conda install -c conda-forge pybind11
 ```
 3. Install [parallel-hdf5](https://support.hdfgroup.org/HDF5/PHDF5/), [mpi4py](https://mpi4py.readthedocs.io/en/stable/install.html) and [h5py-mpi](https://docs.h5py.org/en/stable/mpi.html), and .
@@ -30,7 +30,7 @@ make -j4; make install
 ## Download AxiSEM-1.4
 Download version 1.4 of [axisem](https://github.com/geodynamics/axisem). And install all required libraries from it's manual.
 
-Ssubstitute `nc_routines.F90` in `axisem/SOLVER/` by the same file in `nc_routines.tar.gz`.
+Ssubstitute `nc_routines.F90` in `axisem/SOLVER/` by the same file in `axisem_files.tar.gz`.
 
 ## Prepare AxiSEM Files
 In `SOLVER/inparam_advanced`, you should set the several parameters:
@@ -48,7 +48,8 @@ KERNEL_COLAT_MAX   100.
 KERNEL_RMIN        5000.
 KERNEL_RMAX        6372.
 ```
-Then you can edit several files: `inparam_basic`, `inparam_source`,`CMTSOLUTION`,`STATIONS`
+Then you can edit several files: `inparam_mesh`,`inparam_basic`, `inparam_source`,`CMTSOLUTION`,`STATIONS`.
+And if you want to use a smoothed-ak135 model up to 1000km, please use `ak135.smooth.bm` in `axisem_files.tar.gz`
 
 ## Run AxiSEM simulation
 Build **AxiSEM** with `USE_NETCDF` mode, and run it on your cluster. 

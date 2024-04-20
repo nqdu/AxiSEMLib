@@ -18,4 +18,4 @@ nt=1000
 dt=0.025
 t0=0.  # started from earthquake origin time
 
-mpirun -np 120 python coupling_specfem.py  $axisem_data_dir $coordir $t0 $dt $nt $outdir
+mpirun -np 120 python ../../coupling_specfem.py  $axisem_data_dir $coordir $t0 $dt $nt $outdir

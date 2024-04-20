@@ -123,7 +123,7 @@ def main():
         exit(1)
     basedir = sys.argv[1]
     coordir = sys.argv[2]
-    t0,dt = map(lambda x: float(x),sys.argv[3:4])
+    t0,dt = map(lambda x: float(x),sys.argv[3:5])
     nt = int(sys.argv[5])
     outdir = sys.argv[6]
     os.system(f'mkdir -p {outdir}')
