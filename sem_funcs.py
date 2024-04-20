@@ -9,6 +9,8 @@ AxiSEM's kernel module.
 :license:
     GNU Lesser General Public License, Version 3 [non-commercial/academic use]
     (http://www.gnu.org/copyleft/lgpl.html)
+
+: Modified by nqdu on Dec 12th, 2023
 """
 from lib import libsem
 import numpy as np

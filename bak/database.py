@@ -37,8 +37,9 @@ def rotate_tensor2(eps,R):
     return eps_xyz
 
 class AxiBasicDB:
+
     def __init__(self) -> None:
-        pass 
+        pass
 
     def read_basic(self,ncfile:str) -> None:
         """
@@ -71,8 +72,8 @@ class AxiBasicDB:
         self.rot_mat = rotation_matrix(evcola,evlo)
 
         # read mesh 
-        self.mesh_s = fio['Mesh/mesh_S'][:]
-        self.mesh_z = fio['Mesh/mesh_Z'][:]
+        self.s = fio['Mesh/mesh_S'][:]
+        self.z = fio['Mesh/mesh_Z'][:]
 
         # create kdtree
         md_pts = np.zeros((self.nspec,2))
@@ -109,67 +110,6 @@ class AxiBasicDB:
 
         # data file dict
         self.iodict = {}
-    
-    def __copy__(self):
-        """
-        shallow copy of necessary basic variables
-        """
-        db = AxiBasicDB()
-
-        # shallow copy of necessary variables
-        db.nspec = self.nspec
-        db.nctrl = self.nctrl
-        db.ngll  = self.ngll
-
-        # attributes
-        db.dtsamp = self.dtsamp
-        db.shift = self.shift
-        db.nt = self.nt
-        db.nglob = self.nglob
-    
-        # source parameters
-        db.evdp = self.evdp
-        db.evla = self.evla
-        db.evlo = self.evlo
-        db.mag = self.mag
-
-        # rotation matrix
-        db.rot_mat = self.rot_mat * 1.
-
-        # read mesh 
-        db.mesh_s = self.mesh_s
-        db.mesh_z = self.mesh_z
-
-        # create kdtree
-        db.kdtree = self.kdtree
-
-        # elemtype
-        db.eltype = self.eltype
-        db.axis = self.axis
-
-        # skeleton
-        db.skelid = self.skelid
-
-        # connectivity[
-        db.ibool = self.ibool
-
-        # deep copy useful arrays
-        db.G0 = self.G0.copy()
-        db.G1 = self.G1.copy()
-        db.G2 = self.G2.copy()
-        db.G1T = self.G1T.copy()
-        db.G2T = self.G2T.copy()
-        db.gll = self.gll.copy()
-        db.glj = self.glj.copy()
-
-        # elastic moduli
-        db.mu = self.mu
-        db.lamda = self.lamda
-
-        # data file dict
-        db.iodict = {}
-
-        return db
 
     def set_iodata(self,ncfile_dir:str):
         """
@@ -187,29 +127,12 @@ class AxiBasicDB:
         # check if iodit is empty
         if len(self.iodict) == 0 :
             print(f"no data has been accessed, please check {ncfile_dir}!")
-    
-    def copy(self):
-        return self.__copy__()
-    
-    def close(self):
-        for _,val in self.iodict.items():
-            val.close()
-        self.iodict = {}
-    
-    def set_source(self,evla:float,evlo:float):
-        """
-        update source info in the database
-        evla: float
-            latitude of station, in deg
-        evlo: float
-            longitude of station, in deg 
-        """
-        self.evla = evla
-        self.evlo = evlo 
-        self.rot_mat = rotation_matrix(np.pi/2-np.deg2rad(evla),np.deg2rad(evlo))
-        pass
 
-    def read_cmt(self,cmtfile:str):
+    def read_cmt(self,cmtfile):
+        """
+        read cmt file, and return 6 moment tensor components
+        
+        """
         from obspy import read_events
         cat = read_events(cmtfile)[0]
         tensor = cat.focal_mechanisms[0].moment_tensor.tensor
@@ -227,12 +150,12 @@ class AxiBasicDB:
         points = self.kdtree.query([s,z],k=10)[1]
         for tol in [1e-3, 1e-2, 5e-2, 8e-2]:
             for idx in points:
-                skel = np.zeros((self.nctrl,2))
-                ctrl_id = self.skelid[idx,:]
+                skel = np.zeros((4,2))
+                ctrl_id = self.skelid[idx,:4]
                 eltype = self.eltype[idx]
-                for i in range(self.nctrl):
-                    skel[i,0] = self.mesh_s[ctrl_id[i]]
-                    skel[i,1] = self.mesh_z[ctrl_id[i]]
+                for i in range(4):
+                    skel[i,0] = self.s[ctrl_id[i]]
+                    skel[i,1] = self.z[ctrl_id[i]]
 
                 isin,xi,eta = inside_element(s,z,skel,eltype,tolerance=tol)
                 if isin:
@@ -263,33 +186,124 @@ class AxiBasicDB:
         """
         from sem_funcs import lagrange_interpol_2D_td
         nt = self.nt 
+        ngll = self.ngll
 
         # allocate space
         us = np.zeros((nt)); up = us * 0; uz = us * 1.
+
+        # cache element
+        utemp = np.zeros((nt,ngll,ngll,3),dtype=float,order='F')
+
+        # connectivity 
+        ibool = self.ibool[elemid,:,:]
         
-        # dataset info
+        # dataset
         fio:h5py.File = self.iodict[stype]
-        ngll = fio['disp_s'].shape[1]
-        utemp = np.zeros((3,ngll,ngll,nt),dtype=float)
-
-        # read dataset
-        utemp[0,...] = fio['disp_s'][elemid,...]
-        utemp[2,...] = fio['disp_z'][elemid,...]
-        if 'disp_p' in fio.keys():
-            utemp[1,...] = fio['disp_p'][elemid,...]
-        utemp = np.transpose(utemp,(3,2,1,0))
-
-        sgll = self.gll
-        zgll = self.gll
-        flag = self.axis[elemid] == 1
+        disp_s = fio['disp_s']
+        disp_z = fio['disp_z']
+        disp_p = {}
+        flag = 'disp_p' in fio.keys()
         if flag:
-            sgll = self.glj
+            disp_p = fio['disp_p']
+       
+        for iz in range(ngll):
+            for ix in range(ngll):
+                iglob = ibool[iz,ix]
+                #print(iglob,iz,ix)
+                utemp[:,ix,iz,0] = disp_s[iglob,:]
+                utemp[:,ix,iz,2] = disp_z[iglob,:]
+                if flag :
+                    utemp[:,ix,iz,1] = disp_p[iglob,:]
+                    #disp_p.read_direct(utemp[:,ix,iz,1],idx,np.s_[0:nt])
+        
+        # interpolate
+        sgll = self.gll
+        zgll = self.gll 
+        if self.axis[elemid]:
+            sgll = self.glj 
         us = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,0],xi,eta)
         up = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,1],xi,eta)
         uz = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,2],xi,eta)
         
         return us,up,uz
-    
+
+    def _get_displ_t(self,t,elemid,xi,eta,stype):
+        """
+        Get displacement for one station
+
+        stel: float 
+            elevation, in m
+        theta: float 
+            epicenter distance, in rad
+        ncfile: str
+            ncfile which the displ is stored in 
+
+        Returns:
+        
+        us,up,uz: np.ndarray
+            s,p,z components 
+            
+        """
+        from sem_funcs import lagrange_interpol_2D_td
+        ngll = self.ngll
+
+        # allocate space
+        us = np.zeros((1)); up = us * 0; uz = us * 1.
+
+        # cache element
+        utemp = np.zeros((1,ngll,ngll,3),dtype=float,order='F')
+        utemp1 = np.zeros((1,ngll,ngll,3),dtype=float,order='F')
+
+        # connectivity 
+        ibool = self.ibool[elemid,:,:]
+
+        # get time step
+        it = int((t + self.shift) / self.dtsamp)
+        if it < 0 or it >= self.nt-1:
+            return 0.0,0.0,0.0
+        
+        # dataset
+        fio:h5py.File = self.iodict[stype]
+        disp_s = fio['Snapshots/disp_s']
+        disp_z = fio['Snapshots/disp_z']
+        disp_p = {}
+        flag = 'Snapshots/disp_p' in fio.keys()
+        if flag:
+            disp_p = fio['Snapshots/disp_p']
+       
+        for iz in range(ngll):
+            for ix in range(ngll):
+                iglob = ibool[iz,ix]
+                #print(iglob,iz,ix)
+                utemp[0,ix,iz,0] = disp_s[it,iglob]
+                utemp[0,ix,iz,2] = disp_z[it,iglob]
+                utemp1[0,ix,iz,0] = disp_s[it+1,iglob]
+                utemp1[0,ix,iz,2] = disp_z[it+1,iglob]
+                if flag :
+                    utemp[:,ix,iz,1] = disp_p[it,iglob]
+                    utemp1[0,ix,iz,1] = disp_p[it+1,iglob]
+        fio.close()
+        
+        # interpolate
+        sgll = self.gll
+        zgll = self.gll 
+        if self.axis[elemid]:
+            sgll = self.glj 
+        us1 = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,0],xi,eta)
+        up1 = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,1],xi,eta)
+        uz1 = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,2],xi,eta)
+
+        us2 = lagrange_interpol_2D_td(sgll,zgll,utemp1[:,:,:,0],xi,eta)
+        up2 = lagrange_interpol_2D_td(sgll,zgll,utemp1[:,:,:,1],xi,eta)
+        uz2 = lagrange_interpol_2D_td(sgll,zgll,utemp1[:,:,:,2],xi,eta)
+        
+        fac = (t - it * self.dtsamp - self.shift) / self.dtsamp
+        us = us1 + fac * (us2 - us1) 
+        up = up1 + fac * (up2 - up1) 
+        uz = uz1 + fac * (uz2 - uz1) 
+
+        return us,up,uz
+
     def _get_excitation_type(self,stype:str) -> str :
         if stype in ['MZZ',"PZ",'MXX_P_MYY']:
             return 'monopole'
@@ -297,55 +311,67 @@ class AxiBasicDB:
             return 'dipole'
         else:         
             return 'quadpole'
-    
-    def _get_strain(self,elemid:int,xi:float,eta:float,stype:str):
-        """
-        get strain field at a given point, for a given source type
 
-        Parameters:
-        ===================================================
-        elemid: current 
-        xi/eta: local coordinates 
-        stype: source type
+    def _get_strain(self,elemid,xi,eta,stype):
+        """
+        get strain field from file
 
         Returns:
-        ====================================================
         strain : np.ndarray
                 shape(6,nt), ess,epp,ezz,epz,esz,esp
         """
         from sem_funcs import lagrange_interpol_2D_td,strain_td
-        nt = self.nt
-        fio:h5py.File = self.iodict[stype]
-        ngll = fio['disp_s'].shape[1]
+        nt = self.nt 
+        nglob = self.nglob 
+        ngll = self.ngll
 
         # allocate space
         eps = np.zeros((6,nt))
 
+        # get source type
+        etype = self._get_excitation_type(stype)
+
         # cache element
-        utemp = np.zeros((3,ngll,ngll,nt),dtype=float)
+        utemp = np.zeros((nt,ngll,ngll,3),dtype=float,order='F')
+
+        # connectivity 
+        ibool = self.ibool[elemid,:,:]
         
         # dataset
-        # read dataset
-        utemp[0,...] = fio['disp_s'][elemid,...]
-        utemp[2,...] = fio['disp_z'][elemid,...]
-        if 'disp_p' in fio.keys():
-            utemp[1,...] = fio['disp_p'][elemid,...]
-        utemp = np.transpose(utemp,(3,2,1,0))
-
+        fio:h5py.File = self.iodict[stype]
+        disp_s = fio['disp_s']
+        disp_z = fio['disp_z']
+        disp_p = {}
+        flag = 'disp_p' in fio.keys()
+        if flag:
+            disp_p = fio['disp_p']
+        
+        # read utemp 
+        
+        for iz in range(ngll):
+            for ix in range(ngll):
+                iglob = ibool[iz,ix]
+                #print(iglob,iz,ix)
+                utemp[:,ix,iz,0] = disp_s[iglob,:]
+                utemp[:,ix,iz,2] = disp_z[iglob,:]
+                if flag :
+                    utemp[:,ix,iz,1] = disp_p[iglob,:]
+                    #disp_p.read_direct(utemp[:,ix,iz,1],idx,np.s_[0:nt])
         # gll/glj array
         sgll = self.gll
-        zgll = self.gll
-        is_axi = self.axis[elemid] == 1
-        if is_axi:
-            sgll = self.glj
+        zgll = self.gll 
+        if self.axis[elemid]:
+            sgll = self.glj 
 
         # control points
-        skel = np.zeros((self.nctrl,2))
-        ctrl_id = self.skelid[elemid,:]
+        skel = np.zeros((4,2))
+        ctrl_id = self.skelid[elemid,:4]
         eltype = self.eltype[elemid]
-        skel[:,0] = self.mesh_s[ctrl_id]
-        skel[:,1] = self.mesh_z[ctrl_id]
-        if is_axi:
+        for i in range(4):
+            skel[i,0] = self.s[ctrl_id[i]]
+            skel[i,1] = self.z[ctrl_id[i]]
+
+        if self.axis[elemid]:
             G = self.G2 
             GT = self.G1T 
         else:
@@ -353,9 +379,8 @@ class AxiBasicDB:
             GT = self.G2T 
 
         # compute strain shape(nt,npol+1,npol+1,6)
-        etype = self._get_excitation_type(stype)
-        strain = strain_td(utemp,G,GT,sgll,zgll,ngll-1,nt,
-                            skel,eltype,is_axi,etype)
+        strain = strain_td(utemp,G,GT,sgll,zgll,ngll-1,self.nt,
+                            skel,eltype,self.axis[elemid]==1,etype)
 
         # interpolate 
         # es shape(6,nt)
@@ -366,7 +391,7 @@ class AxiBasicDB:
 
     def _get_stress(self,elemid,xi,eta,stype):
         """
-        get stress field for a given point from file
+        get stress field from file
 
         Returns:
         stress : np.ndarray
@@ -374,40 +399,59 @@ class AxiBasicDB:
         """
         from sem_funcs import lagrange_interpol_2D_td,strain_td
         nt = self.nt 
-        fio:h5py.File = self.iodict[stype]
-        ngll = fio['disp_s'].shape[1]
+        ngll = self.ngll
+
+        # get source type
+        etype = self._get_excitation_type(stype)
     
         # cache element
-        utemp = np.zeros((3,ngll,ngll,nt),dtype=float)
+        utemp = np.zeros((nt,ngll,ngll,3),dtype=float,order='F')
+
+        # connectivity 
+        ibool = self.ibool[elemid,:,:]
         
         # dataset
-        utemp[0,...] = fio['disp_s'][elemid,...]
-        utemp[2,...] = fio['disp_z'][elemid,...]
-        if 'disp_p' in fio.keys():
-            utemp[1,...] = fio['disp_p'][elemid,...]
-        utemp = np.transpose(utemp,(3,2,1,0))
+        fio:h5py.File = self.iodict[stype]
+        disp_s = fio['disp_s']
+        disp_z = fio['disp_z']
+        disp_p = {}
+        flag = 'disp_p' in fio.keys()
+        if flag:
+            disp_p = fio['disp_p']
+        
+        # read utemp 
+        for iz in range(ngll):
+            for ix in range(ngll):
+                iglob = ibool[iz,ix]
+                #print(iglob,iz,ix)
+                utemp[:,ix,iz,0] = disp_s[iglob,:]
+                utemp[:,ix,iz,2] = disp_z[iglob,:]
+                if flag :
+                    utemp[:,ix,iz,1] = disp_p[iglob,:]
+                    #disp_p.read_direct(utemp[:,ix,iz,1],idx,np.s_[0:nt])
 
         # alloc arrays for mu and lambda
-        xmu = np.zeros((ngll,ngll),dtype=float)
-        xlam = np.zeros((ngll,ngll),dtype=float)
-        xmu[:,:] = self.mu[elemid,:,:]
-        xlam[:,:] = self.lamda[elemid,:,:]
-        xmu = np.transpose(xmu)
-        xlam = np.transpose(xlam)
+        xmu = np.zeros((ngll,ngll),dtype=float,order='F')
+        xlam = np.zeros((ngll,ngll),dtype=float,order='F')
+        for iz in range(ngll):
+            for ix in range(ngll):
+                iglob = ibool[iz,ix]
+                xmu[ix,iz] = self.mu[iglob]
+                xlam[ix,iz] = self.lamda[iglob]
 
         # gll/glj array
         sgll = self.gll
-        zgll = self.gll
-        is_axi = self.axis[elemid] == 1
-        if is_axi:
-            sgll = self.glj
+        zgll = self.gll 
+        if self.axis[elemid]:
+            sgll = self.glj 
 
         # control points
-        skel = np.zeros((self.nctrl,2))
-        ctrl_id = self.skelid[elemid,:]
+        skel = np.zeros((4,2))
+        ctrl_id = self.skelid[elemid,:4]
         eltype = self.eltype[elemid]
-        skel[:,0] = self.mesh_s[ctrl_id]
-        skel[:,1] = self.mesh_z[ctrl_id]
+        for i in range(4):
+            skel[i,0] = self.s[ctrl_id[i]]
+            skel[i,1] = self.z[ctrl_id[i]]
 
         if self.axis[elemid]:
             G = self.G2 
@@ -417,7 +461,6 @@ class AxiBasicDB:
             GT = self.G2T 
 
         # compute strain shape(nt,npol+1,npol+1,6)
-        etype = self._get_excitation_type(stype)
         strain = strain_td(utemp,G,GT,sgll,zgll,ngll-1,self.nt,
                             skel,eltype,self.axis[elemid]==1,etype)
 
@@ -435,6 +478,119 @@ class AxiBasicDB:
         sigma = np.zeros((6,nt))
         for j in range(6):
             sigma[j,:] = lagrange_interpol_2D_td(sgll,zgll,stress[:,:,:,j],xi,eta)
+        
+        return sigma
+
+    def _get_stress_t(self,t,elemid,xi,eta,ncfile):
+        """
+        get stress field from file
+
+        Returns:
+        stress : np.ndarray
+                shape(6), ess,epp,ezz,epz,esz,esp
+        """
+        from sem_funcs import lagrange_interpol_2D_td,strain_td 
+        ngll = self.ngll
+
+        # get time step
+        it = int((t + self.shift) / self.dtsamp)
+        if it < 0 or it >= self.nt-1:
+            return np.zeros((6),dtype=float)
+    
+        # cache element
+        utemp = np.zeros((1,ngll,ngll,3),dtype=float,order='F')
+        utemp1 = np.zeros((1,ngll,ngll,3),dtype=float,order='F')
+
+        # get source type
+        ncfile_org = ncfile
+        fio = h5py.File(ncfile_org,"r")
+        stype = fio.attrs['excitation type'].decode("utf-8")
+        fio.close()
+
+        # connectivity 
+        ibool = self.ibool[elemid,:,:]
+        
+        # dataset
+        fio = h5py.File(ncfile,"r")
+        disp_s = fio['Snapshots/disp_s']
+        disp_z = fio['Snapshots/disp_z']
+        disp_p = {}
+        flag = 'Snapshots/disp_p' in fio.keys()
+        if flag:
+            disp_p = fio['Snapshots/disp_p']
+        
+        for iz in range(ngll):
+            for ix in range(ngll):
+                iglob = ibool[iz,ix]
+                #print(iglob,iz,ix)
+                utemp[0,ix,iz,0] = disp_s[it,iglob]
+                utemp[0,ix,iz,2] = disp_z[it,iglob]
+                utemp1[0,ix,iz,0] = disp_s[it+1,iglob]
+                utemp1[0,ix,iz,2] = disp_z[it+1,iglob]
+                if flag :
+                    utemp[0,ix,iz,1] = disp_p[it,iglob]
+                    utemp1[0,ix,iz,1] = disp_p[it+1,iglob]
+        fio.close()
+
+        # alloc arrays for mu and lambda
+        xmu = np.zeros((ngll,ngll),dtype=float,order='F')
+        xlam = np.zeros((ngll,ngll),dtype=float,order='F')
+        for iz in range(ngll):
+            for ix in range(ngll):
+                iglob = ibool[iz,ix]
+                xmu[ix,iz] = self.mu[iglob]
+                xlam[ix,iz] = self.lamda[iglob]
+
+        # gll/glj array
+        sgll = self.gll
+        zgll = self.gll 
+        if self.axis[elemid]:
+            sgll = self.glj 
+
+        # control points
+        skel = np.zeros((4,2))
+        ctrl_id = self.skelid[elemid,:4]
+        eltype = self.eltype[elemid]
+        for i in range(4):
+            skel[i,0] = self.s[ctrl_id[i]]
+            skel[i,1] = self.z[ctrl_id[i]]
+
+        if self.axis[elemid]:
+            G = self.G2 
+            GT = self.G1T 
+        else:
+            G = self.G2 
+            GT = self.G2T 
+
+        # compute strain shape(nt,npol+1,npol+1,6)
+        strain = strain_td(utemp,G,GT,sgll,zgll,ngll-1,1,
+                            skel,eltype,self.axis[elemid]==1,stype)
+        strain1 = strain_td(utemp1,G,GT,sgll,zgll,ngll-1,1,
+                            skel,eltype,self.axis[elemid]==1,stype)
+
+        # compute stress
+        stress = strain * 0.; stress1 = strain1 * 0.
+        stress[...,0] = (xlam + 2 * xmu) * strain[...,0] + xlam * (strain[...,1] + strain[...,2])
+        stress[...,1] = (xlam + 2 * xmu) * strain[...,1] + xlam * (strain[...,0] + strain[...,2])
+        stress[...,2] = (xlam + 2 * xmu) * strain[...,2] + xlam * (strain[...,0] + strain[...,1])
+        stress[...,3] = 2. * xmu * strain[...,3]
+        stress[...,4] = 2. * xmu * strain[...,4]
+        stress[...,5] = 2. * xmu * strain[...,5]
+        stress1[...,0] = (xlam + 2 * xmu) * strain1[...,0] + xlam * (strain1[...,1] + strain1[...,2])
+        stress1[...,1] = (xlam + 2 * xmu) * strain1[...,1] + xlam * (strain1[...,0] + strain1[...,2])
+        stress1[...,2] = (xlam + 2 * xmu) * strain1[...,2] + xlam * (strain1[...,0] + strain1[...,1])
+        stress1[...,3] = 2. * xmu * strain1[...,3]
+        stress1[...,4] = 2. * xmu * strain1[...,4]
+        stress1[...,5] = 2. * xmu * strain1[...,5]
+
+        fac = (t - it * self.dtsamp - self.shift) / self.dtsamp
+        stress = stress + fac * (stress1 - stress)
+
+        # interpolate 
+        # es shape(6,nt)
+        sigma = np.zeros((6))
+        for j in range(6):
+            sigma[j] = lagrange_interpol_2D_td(sgll,zgll,stress[:,:,:,j],xi,eta)
         
         return sigma
 
@@ -459,8 +615,6 @@ class AxiBasicDB:
         #r = np.sqrt(x1**2 + y1**2)
         theta = np.arccos(z1/r)
         phi = np.arctan2(y1,x1)
-        # if phi < 0:
-        #     phi = np.pi - phi
 
         return theta,phi
     
@@ -500,6 +654,7 @@ class AxiBasicDB:
         else:
             fx,fy,fz = forcevec
             srctypes = ["PZ","PX","PY"]
+
 
         # alloc space for seismograms
         nt = self.nt 
@@ -580,7 +735,8 @@ class AxiBasicDB:
 
         return u1,u2,u3
 
-    def syn_strain(self,stla,stlo,stel,cmtfile=None,forcevec=None):
+
+    def syn_strain(self,simu_path,stla,stlo,stel,cmtfile=None,forcevec=None):
         # read source type
         assert((cmtfile is not None) or (forcevec is not None))
         mzz,mxx,myy,mxz,myz,mxy = [0. for i in range(6)]
@@ -609,6 +765,7 @@ class AxiBasicDB:
         for stype in srctypes:
             #print("synthetic strain tensor for  ... %s" %(stype))
             # get basic waveform
+            #filename = simu_path + "/" + stype + "/Data/axisem_fields.h5"
             eps0 = self._get_strain(elemid,xi,eta,stype)
 
             # parameters
@@ -654,6 +811,7 @@ class AxiBasicDB:
 
         return eps_xyz
 
+
     def syn_stress(self,stla,stlo,stel,cmtfile=None,forcevec=None):
         # read source type
         assert((cmtfile is not None) or (forcevec is not None))
@@ -683,6 +841,7 @@ class AxiBasicDB:
         for stype in srctypes:
             #print("synthetic strain tensor for  ... %s" %(stype))
             # get basic waveform
+            #filename = simu_path + "/" + stype + "/Data/axisem_fields.h5"
             eps0 = self._get_stress(elemid,xi,eta,stype)
 
             # parameters

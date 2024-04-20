@@ -1,27 +1,39 @@
-# AXISEM-SPECFEM3D Coupling Notes
+# AxiSEMLib
+
+**AxiSEMLib** is a python library that enables several extensional functionalies of the [AxiSEM](https://github.com/geodynamics/axisem):
+
+* Synthesize accurate seismograms/strain/stress at any points of the earth.
+* Teleseismic injection interfaces between **AxiSEM** and [SPECFEM3D](https://github.com/SPECFEM/specfem3d)/[SPECFEM3D-injection][https://github.com/tianshi-liu/specfem3D-injection]
+ 
+GMT uses the coast utility to access a version of the GSHHG data specially formatted for GMT. The GSHHG data have strengths and weaknesses. It is global and open source, but is based on relatively old datasets and hence may not be accurate enough for very large-scale mapping projects. The current GSHHG version used by GMT is 2.3.7. Below is a mostly technical description of how the GSHHG data set was assembled, processed, and formatted to meet the requirements of GMT.
 
 ## This is the test version, user manual and examples will be updated later ...
 
-## step1 : Download axisem-1.4
-Download version 1.4 of [axisem](https://github.com/geodynamics/axisem). 
+## Download required packages
+1. **Compilers:** c++/Fortran Compilers which support c++14 (tested on `GCC >=7.5`, `ICC >=19.2.0`), `cmake >= 3.12`, and MPI libraries.
 
-If you want to use the fast version, you should substitute `nc_routines.F90` in `axisem/SOLVER/` with that in `axisem_fast.tar.gz`.
-
-## step2: download required software
-1. create a new environment with conda:
+2. create a new environment with conda:
 ```bash
 conda create -n axisem_lib python=3.8 
 conda activate axisem_lib
-conda install numpy scipy numba mpi4py
-conda install -c conda-forge pybind11  
+conda install numpy scipy numba
+conda install -c conda-forge pybind11
 ```
-2. You should install [parallel-hdf5](https://support.hdfgroup.org/HDF5/PHDF5/), and [h5py](https://docs.h5py.org/en/stable/mpi.html). Then you can change the `EIGEN_INC` in `compile.sh`, and compile this package by :
+3. Install [parallel-hdf5](https://support.hdfgroup.org/HDF5/PHDF5/), [mpi4py](https://mpi4py.readthedocs.io/en/stable/install.html) and [h5py-mpi](https://docs.h5py.org/en/stable/mpi.html), and .
+
+4. build `AxiSEMLib` by using:
 ```bash
-bash compie.sh
+mkdir -p build; cd build;
+cmake .. -DCXX=g++ -DFC=gfortran  -DPYTHON_EXECUTABLE=`which python`
+make -j4; make install 
 ```
 
+## Download AxiSEM-1.4
+Download version 1.4 of [axisem](https://github.com/geodynamics/axisem). And install all required libraries from it's manual.
 
-## step3: Prepare AXISEM Files
+Ssubstitute `nc_routines.F90` in `axisem/SOLVER/` by the same file in `nc_routines.tar.gz`.
+
+## Prepare AxiSEM Files
 In `SOLVER/inparam_advanced`, you should set the several parameters:
 ```bash 
 KERNEL_WAVEFIELDS   true
@@ -37,30 +49,15 @@ KERNEL_COLAT_MAX   100.
 KERNEL_RMIN        5000.
 KERNEL_RMAX        6372.
 ```
-Then you can edit several files: `inparam_basic`, `inparam_source`,`CMTSOLUTION`
+Then you can edit several files: `inparam_basic`, `inparam_source`,`CMTSOLUTION`,`STATIONS`
 
-## step4: run simulation
-Build axisem with `USE_NETCDF` mode, and run it.
-`
-## step5: Prepare Boundary Points
-your should provide two files `proc*_wavefield_discontinuity_faces` and `proc*_wavefield_discontinuity_points`. The first file is with format: 
-```bash
-x y z
-```
-where `x/y/z` are Cartesian coordinates for each boundary points with dimension `m`. Note that this file should be of shape (nbds), only keep unique points. For second:
-```bash
-x y z nx ny nz
-```
-where `x/y/z` are Cartesian coordinates for each boundary points with dimension `m` and `n_x/y/z` are the normal vector ouside the study region. It should be of the shape (nspec_bd,NGLL2)
+## Run AxiSEM simulation
+Build **AxiSEM** with `USE_NETCDF` mode, and run it on your cluster. 
 
-## step7 transpose the output field.
-change the variables in `submit_transpose.sh`, then:
+## Transpose the output field.
+Set the variables in `submit_transpose.sh`, then:
 ```bash
 bash submit_transpose.sh 
 ```
 
-## step8 compute coupling field:
-change the variables in `bash submit_prepare_fields.sh`, then:
-```bash
-bash submit_prepare_fields.sh 
-```
+## Check examples in `test/` !

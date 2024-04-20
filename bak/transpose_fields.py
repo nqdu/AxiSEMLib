@@ -40,10 +40,10 @@ def write_transpose_data(file_r:h5py.File,file_w:h5py.File,
     myrank = MPI.COMM_WORLD.Get_rank()
 
     # create temp dataset
-    dset3 = file_w.create_dataset(dsetstr + ".tmp",(npts,nt),dtype=np.float32)
+    dset3 = file_w.create_dataset(dsetstr,(npts,nt),dtype=np.float32)
 
     # estimate max memory usage
-    sizeGB = 2.
+    sizeGB = 4.
     
     npts_one = int((sizeGB * 1024**3) / (nt*4))
     for i in tqdm(range(0,npts,npts_one)):
@@ -67,22 +67,6 @@ def write_transpose_data(file_r:h5py.File,file_w:h5py.File,
 
         # write to dset2
         dset3[istart:istart+n,:] = mydata 
-
-
-    # now we change (ngll_all,nt) to (nspec,ngll_out,ngll_out,nt)
-    dset2 = file_w.create_dataset(dsetstr,(nspec,ngll_out,ngll_out,nt),dtype=np.float32)
-
-    for ispec in tqdm(range(myrank,nspec,nprocs)):
-        mydata = np.zeros((ngll_out,ngll_out,nt),dtype='f4')
-        for iz in range(ngll_out):
-            for ix in range(ngll_out):
-                iz1 = idx[iz]
-                ix1 = idx[ix]
-                iglob = ibool[ispec,iz1,ix1]
-                dset2[ispec,iz,ix,:] = dset3[iglob,:] * np.float32(1.)
-
-    # close and delete
-    del file_w[dsetstr + ".tmp"]
 
 def main():
     if len(sys.argv) < 3:
