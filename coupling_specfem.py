@@ -2,7 +2,6 @@ from database import AxiBasicDB,rotation_matrix,rotate_tensor2
 import numpy as np 
 import os 
 from scipy.io import FortranFile
-import h5py 
 from mpi4py import MPI
 from scipy.interpolate import interp1d 
 import sys 
@@ -69,8 +68,8 @@ def get_field_proc(args):
     f = FortranFile(outbin,'w')
     if npts == 0:
         for i in range(nt1):
-            f.write_record(veloc_axi[i,...],'f4')
-            f.write_record(trac_axi[i,...],'f4')
+            f.write_record(veloc_axi[i,...])
+            f.write_record(trac_axi[i,...])
         f.close()
         return 0
 
@@ -87,7 +86,7 @@ def get_field_proc(args):
         # get rotation matrix from (xyz) to (enz)
         R = rotation_matrix(np.deg2rad(90-stla[ir]),np.deg2rad(stlo[ir]))
         tmp = R[:,1] * 1.
-        R[:,1] = -R[:,0] * 1. # \hat{e}_n is -\hat{\theta}
+        R[:,1] = -R[:,0] * 1. # \hat{n}_n is -\hat{\theta}
         R[:,0] = tmp * 1.
         R = R.T
 
@@ -119,8 +118,8 @@ def get_field_proc(args):
 
     # write file
     for i in range(nt1):
-        f.write_record(veloc_axi[i,...],'f4')
-        f.write_record(trac_axi[i,...],'f4')
+        f.write_record(veloc_axi[i,...])
+        f.write_record(trac_axi[i,...])
         
     f.close()
 

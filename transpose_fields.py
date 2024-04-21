@@ -4,25 +4,7 @@ from mpi4py import MPI
 from tqdm import tqdm 
 import sys 
 import os 
-
-def allocate_task(ntasks,nprocs,myrank):
-
-    sub_n = ntasks // nprocs
-    num_larger_procs = ntasks - nprocs * sub_n
-    starid = 0; endid = 0
-    if myrank < num_larger_procs :
-        sub_n = sub_n + 1
-        startid = 0 + myrank * sub_n
-    elif sub_n > 0:
-        startid = 0 + num_larger_procs + myrank * sub_n
-    else: # // this process has only zero elements
-        startid = -1
-        sub_n = 0
-    
-    endid = startid + sub_n - 1
-
-    return startid,endid
-
+from utils import allocate_task
 
 def write_transpose_data(file_r:h5py.File,file_w:h5py.File,
                          dataname:str,dsetstr:str,stride=1):
