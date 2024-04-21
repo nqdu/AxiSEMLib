@@ -4,6 +4,8 @@
 
 * Synthesize accurate seismograms/strain/stress at any points of the earth.
 * Teleseismic injection interfaces between **AxiSEM**, [SPECFEM3D](https://github.com/SPECFEM/specfem3d) and [SPECFEM3D-injection](https://github.com/tianshi-liu/specfem3D-injection)
+
+Part of the code are adapted from [Instaseis](https://github.com/krischer/instaseis), so LGPL license is applied.
  
 
 ## This is the test version, user manual and examples will be updated later ...
