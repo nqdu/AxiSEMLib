@@ -55,7 +55,7 @@ def get_field_proc(args):
     if tvec is None:
         t1 = np.arange(20000) * 0.05 - db.shift 
     else:
-        t1 = tvec
+        t1 = tvec - db.shift
     dt1 = t1[1] - t1[0]
     nt1 = len(t1)
 
@@ -68,8 +68,7 @@ def get_field_proc(args):
     f = FortranFile(outbin,'w')
     if npts == 0:
         for i in range(nt1):
-            f.write_record(veloc_axi[i,...])
-            f.write_record(trac_axi[i,...])
+            f.write_record(veloc_axi[i,...],trac_axi[i,...])
         f.close()
         return 0
 
@@ -118,8 +117,7 @@ def get_field_proc(args):
 
     # write file
     for i in range(nt1):
-        f.write_record(veloc_axi[i,...])
-        f.write_record(trac_axi[i,...])
+        f.write_record(veloc_axi[i,...],trac_axi[i,...])
         
     f.close()
 

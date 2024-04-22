@@ -51,7 +51,7 @@ KERNEL_RMIN        5000.
 KERNEL_RMAX        6372.
 ```
 Then you can edit several files: `inparam_mesh`,`inparam_basic`, `inparam_source`,`CMTSOLUTION`,`STATIONS`.
-And if you want to use a smoothed-ak135 model up to 1000km, please use `ak135.smooth.bm` in `axisem_files.tar.gz`
+And if you want to use a smoothed-ak135 model, please check parameters in  `smooth_model/ak135_smooth.py`.
 
 ## Run AxiSEM simulation
 Build **AxiSEM** with `USE_NETCDF` mode, and run it on your cluster. 
