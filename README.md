@@ -1,6 +1,6 @@
 # AxiSEMLib
 
-**AxiSEMLib** is a python library that enables several extensional functionalies of the [AxiSEM](https://github.com/geodynamics/axisem):
+**AxiSEMLib** is a python library that provides several extensionals for the [AxiSEM](https://github.com/geodynamics/axisem):
 
 * Synthesize accurate seismograms/strain/stress at any points of the earth.
 * Teleseismic injection interfaces between **AxiSEM**, [SPECFEM3D](https://github.com/SPECFEM/specfem3d) and [SPECFEM3D-injection](https://github.com/tianshi-liu/specfem3D-injection)
@@ -18,7 +18,7 @@ Part of the code are adapted from [Instaseis](https://github.com/krischer/instas
 conda create -n axisem_lib python=3.8 
 conda activate axisem_lib
 conda install numpy scipy numba pyproj
-conda install -c conda-forge pybind11
+pip install pybind11-global
 ```
 3. Install [parallel-hdf5](https://support.hdfgroup.org/HDF5/PHDF5/), [mpi4py](https://mpi4py.readthedocs.io/en/stable/install.html) and [h5py-mpi](https://docs.h5py.org/en/stable/mpi.html), and .
 
