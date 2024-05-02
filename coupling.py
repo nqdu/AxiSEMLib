@@ -6,6 +6,90 @@ from mpi4py import MPI
 from scipy.interpolate import interp1d 
 import sys 
 from utils import cart2sph,diff1,allocate_task
+from scipy.io import FortranFile
+
+def get_wavefield_proc(args):
+    iproc,basedir,coordir,outdir,tvec = args
+    datadir = coordir
+    file_trac = datadir + "proc%06d_wavefield_discontinuity_faces"%iproc
+    file_disp = datadir + "proc%06d_wavefield_discontinuity_points"%iproc
+    outbin = "%s/proc%06d_wavefield_discontinuity.bin"%(outdir,iproc)
+
+     # read database
+    db = AxiBasicDB()
+    db.read_basic(basedir + "/MZZ/Data/axisem_output.nc4")
+    db.set_iodata(basedir)
+
+    # time vector
+    t0 = np.arange(db.nt) * db.dtsamp - db.shift
+    if tvec is None:
+        t1 = np.arange(20000) * 0.05 - db.shift 
+    else:
+        t1 = tvec - db.shift
+    nt1 = len(t1)
+    dt1 = t1[1] - t1[0]
+
+    # create datafile for displ/accel
+    data = np.loadtxt(file_disp,ndmin=2)
+    r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
+    stel = -6371000 + r
+    f = h5py.File("%s/displ_proc%06d.h5"%(outdir,iproc),"w")
+    dset_d = f.create_dataset("displ",(nt1,len(r),3),dtype=np.float32,chunks=True)
+    dset_a = f.create_dataset("accel",(nt1,len(r),3),dtype=np.float32,chunks=True)
+
+    # compute displ/accel on the injection boundaries
+    if iproc == 0: print("synthetic displ/accel ...")
+    for ir in range(len(stla)):
+        #print(f"synthetic displ/accel for point {ir+1} in proc {iproc} ...")
+        ux1,uy1,uz1 = db.syn_seismo(stla[ir],stlo[ir],stel[ir],'xyz',basedir + '/CMTSOLUTION')
+
+        ux = interp1d(t0,ux1,bounds_error=False,fill_value=0.)(t1)
+        uy = interp1d(t0,uy1,bounds_error=False,fill_value=0.)(t1)
+        uz = interp1d(t0,uz1,bounds_error=False,fill_value=0.)(t1)
+        dset_d[:,ir,0] = np.float32(ux)
+        dset_d[:,ir,1] = np.float32(uy)
+        dset_d[:,ir,2] = np.float32(uz)
+
+        dset_a[:,ir,0] = diff1(diff1(ux,dt1),dt1)
+        dset_a[:,ir,1] = diff1(diff1(uy,dt1),dt1)
+        dset_a[:,ir,2] = diff1(diff1(uz,dt1),dt1)
+    f.close()
+
+    # compute traction on the injection boundaries
+    data = np.loadtxt(file_trac,ndmin=2)
+    r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
+    stel = -6371000 + r
+    f1 = h5py.File("%s/traction_proc%06d.h5"%(outdir,iproc),"w")
+    dset_t = f1.create_dataset("trac",(nt1,len(r),3),dtype=np.float32,chunks=True)
+    if iproc == 0: print("synthetic traction ...")
+
+    for ir in range(len(stla)):
+        #print(f"synthetic traction for point {ir+1} in proc {iproc} ...")
+        sig_xyz = db.syn_stress(stla[ir],stlo[ir],stel[ir],basedir + '/CMTSOLUTION')
+        Tx = np.zeros((db.nt)); Ty = Tx *  1.; Tz = Tx * 1. 
+
+        nx = data[ir,3]; ny = data[ir,4]; nz = data[ir,5]
+        Tx = sig_xyz[0,:] * nx + sig_xyz[5,:] * ny + sig_xyz[4,:] * nz 
+        Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz 
+        Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz 
+
+        dset_t[:,ir,0] = interp1d(t0,Tx,bounds_error=False,fill_value=0.)(t1)
+        dset_t[:,ir,1] = interp1d(t0,Ty,bounds_error=False,fill_value=0.)(t1)
+        dset_t[:,ir,2] = interp1d(t0,Tz,bounds_error=False,fill_value=0.)(t1)
+        
+    f1.close()
+
+    # write final binary for specfem_injection
+    f = h5py.File("%s/displ_proc%06d.h5"%(outdir,iproc),"r")
+    f1 = h5py.File("%s/traction_proc%06d.h5"%(outdir,iproc),"r")
+    fileio = FortranFile(outbin,"w")
+    for it in range(nt1):
+        fileio.write_record(f['displ'][it,:,:])
+        fileio.write_record(f['accel'][it,:,:])
+        fileio.write_record(f1['trac'][it,:,:])
+    fileio.close()
+    f.close()
+    f1.close()
 
 def get_trac_proc(args):
     iproc,basedir,coordir,outdir,tvec = args
@@ -32,7 +116,7 @@ def get_trac_proc(args):
     if tvec is None:
         t1 = np.arange(20000) * 0.05 - db.shift 
     else:
-        t1 = tvec
+        t1 = tvec - db.shift
     nt1 = len(t1)
     dset = f.create_dataset("field",(nt1,len(r),3),dtype=np.float32,chunks=True)
     field = np.zeros((nt1,3),dtype=np.float32)
@@ -88,7 +172,7 @@ def get_displ_proc(args):
     if tvec is None:
         t1 = np.arange(20000) * 0.05 - db.shift 
     else:
-        t1 = tvec
+        t1 = tvec - db.shift
     nt1 = len(t1)
     dt1 = t1[1] - t1[0]
     dset = f.create_dataset("field",(nt1,len(r),6),dtype=np.float32,chunks=True)
@@ -147,8 +231,9 @@ def main():
     #basedir = '/home/l/liuqy/nqdu/scratch/axisem/SOLVER/ak135'
     for i in range(startid,endid+1):
         args = (i,basedir,coordir,outdir,t1)
-        get_trac_proc(args)
-        get_displ_proc(args)
+        get_wavefield_proc(args)
+        #get_trac_proc(args)
+        #get_displ_proc(args)
     
     MPI.Finalize()
 

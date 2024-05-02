@@ -80,12 +80,12 @@ def get_field_proc(args):
 
     if iproc == 0: print("synthetic traction/velocity ...")
     for ir in range(npts):
-        print(f"synthetic traction for point {ir+1} of {npts} in proc {iproc} ...")
+        #print(f"synthetic traction for point {ir+1} of {npts} in proc {iproc} ...")
 
         # get rotation matrix from (xyz) to (enz)
         R = rotation_matrix(np.deg2rad(90-stla[ir]),np.deg2rad(stlo[ir]))
         tmp = R[:,1] * 1.
-        R[:,1] = -R[:,0] * 1. # \hat{n}_n is -\hat{\theta}
+        R[:,1] = -R[:,0] * 1. # \hat{e}_n is -\hat{\theta}
         R[:,0] = tmp * 1.
         R = R.T
 
