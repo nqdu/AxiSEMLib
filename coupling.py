@@ -30,16 +30,20 @@ def get_wavefield_proc(args):
     dt1 = t1[1] - t1[0]
 
     # create datafile for displ/accel
-    data = np.loadtxt(file_disp,ndmin=2)
-    r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
-    stel = -6371000 + r
+    if os.path.getsize(file_disp) != 0:
+        data = np.loadtxt(file_disp,ndmin=2)
+        r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
+        stel = -6371000 + r
+        npts = len(r)
+    else:
+        npts = 0
     f = h5py.File("%s/displ_proc%06d.h5"%(outdir,iproc),"w")
-    dset_d = f.create_dataset("displ",(nt1,len(r),3),dtype=np.float32,chunks=True)
-    dset_a = f.create_dataset("accel",(nt1,len(r),3),dtype=np.float32,chunks=True)
+    dset_d = f.create_dataset("displ",(nt1,npts,3),dtype=np.float32,chunks=True)
+    dset_a = f.create_dataset("accel",(nt1,npts,3),dtype=np.float32,chunks=True)
 
     # compute displ/accel on the injection boundaries
     if iproc == 0: print("synthetic displ/accel ...")
-    for ir in range(len(stla)):
+    for ir in range(npts):
         #print(f"synthetic displ/accel for point {ir+1} in proc {iproc} ...")
         ux1,uy1,uz1 = db.syn_seismo(stla[ir],stlo[ir],stel[ir],'xyz',basedir + '/CMTSOLUTION')
 
@@ -56,14 +60,18 @@ def get_wavefield_proc(args):
     f.close()
 
     # compute traction on the injection boundaries
-    data = np.loadtxt(file_trac,ndmin=2)
-    r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
-    stel = -6371000 + r
+    if os.path.getsize(file_trac) != 0:
+        data = np.loadtxt(file_trac,ndmin=2)
+        r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
+        stel = -6371000 + r
+        npts = len(r)
+    else:
+        npts = 0
     f1 = h5py.File("%s/traction_proc%06d.h5"%(outdir,iproc),"w")
-    dset_t = f1.create_dataset("trac",(nt1,len(r),3),dtype=np.float32,chunks=True)
+    dset_t = f1.create_dataset("trac",(nt1,npts,3),dtype=np.float32,chunks=True)
     if iproc == 0: print("synthetic traction ...")
 
-    for ir in range(len(stla)):
+    for ir in range(npts):
         #print(f"synthetic traction for point {ir+1} in proc {iproc} ...")
         sig_xyz = db.syn_stress(stla[ir],stlo[ir],stel[ir],basedir + '/CMTSOLUTION')
         Tx = np.zeros((db.nt)); Ty = Tx *  1.; Tz = Tx * 1. 
