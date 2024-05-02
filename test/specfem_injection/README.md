@@ -1,5 +1,5 @@
 # Prepare Boundary Points
-your should provide two files `proc*_wavefield_discontinuity_faces` and `proc*_wavefield_discontinuity_points`. The first file is with format: 
+your should provide two files `proc*_wavefield_discontinuity_pointss` and `proc*_wavefield_discontinuity_faces`. The first file is with format: 
 ```bash
 x y z
 ```

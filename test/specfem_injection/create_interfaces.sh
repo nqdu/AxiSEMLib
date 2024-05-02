@@ -10,7 +10,7 @@ module load gcc openmpi python/3.9.8 parallel-hdf5/gcc-8.3.0
 
 # set your params
 axisem_data_dir=.. # like /path/to/axisem/SOLVER/ak135
-output_dir=..  # OUTPUT traction/displ/accel to this dir
+outdir=..  # OUTPUT traction/displ/accel to this dir
 coordir=.. # wave_discon_*coordinates 
 
 # time window

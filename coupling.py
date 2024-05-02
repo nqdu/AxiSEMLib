@@ -42,7 +42,7 @@ def get_wavefield_proc(args):
     dset_a = f.create_dataset("accel",(nt1,npts,3),dtype=np.float32,chunks=True)
 
     # compute displ/accel on the injection boundaries
-    if iproc == 0: print("synthetic displ/accel ...")
+    print(f"synthetic displ/accel for {file_disp} ...")
     for ir in range(npts):
         #print(f"synthetic displ/accel for point {ir+1} in proc {iproc} ...")
         ux1,uy1,uz1 = db.syn_seismo(stla[ir],stlo[ir],stel[ir],'xyz',basedir + '/CMTSOLUTION')
@@ -69,7 +69,7 @@ def get_wavefield_proc(args):
         npts = 0
     f1 = h5py.File("%s/traction_proc%06d.h5"%(outdir,iproc),"w")
     dset_t = f1.create_dataset("trac",(nt1,npts,3),dtype=np.float32,chunks=True)
-    if iproc == 0: print("synthetic traction ...")
+    print(f"synthetic traction for {file_trac} ...")
 
     for ir in range(npts):
         #print(f"synthetic traction for point {ir+1} in proc {iproc} ...")
@@ -98,6 +98,10 @@ def get_wavefield_proc(args):
     fileio.close()
     f.close()
     f1.close()
+
+    # remove h5 file
+    os.remove("%s/displ_proc%06d.h5"%(outdir,iproc))
+    os.remove("%s/traction_proc%06d.h5"%(outdir,iproc))
 
 def get_trac_proc(args):
     iproc,basedir,coordir,outdir,tvec = args
