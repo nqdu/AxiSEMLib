@@ -51,11 +51,8 @@ def get_field_proc(args):
     npts = len(xx)
 
     # create dataset
-    t0 = np.arange(db.nt) * db.dtsamp - db.shift
-    if tvec is None:
-        t1 = np.arange(20000) * 0.05 - db.shift 
-    else:
-        t1 = tvec - db.shift
+    t0 = np.arange(db.nt) * db.dtsamp + db.t0
+    t1 = tvec.copy()
     dt1 = t1[1] - t1[0]
     nt1 = len(t1)
 

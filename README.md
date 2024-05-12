@@ -32,7 +32,7 @@ make -j4; make install
 ## Download AxiSEM-1.4
 Download version 1.4 of [axisem](https://github.com/geodynamics/axisem). And install all required libraries from it's manual.
 
-Ssubstitute `nc_routines.F90` in `axisem/SOLVER/` by the same file in `axisem_files.tar.gz`.
+Move all files of `axisem_files.tar.gz` to `axisem/SOLVER/`.
 
 ## Prepare AxiSEM Files
 In `SOLVER/inparam_advanced`, you should set the several parameters:
@@ -40,6 +40,10 @@ In `SOLVER/inparam_advanced`, you should set the several parameters:
 KERNEL_WAVEFIELDS   true
 KERNEL_DUMPTYPE     displ_only
 KERNEL_SPP          8/16/32 (depend on your dominant frequency)
+
+# you should add this one 
+# KERNEL  dump  after KERNEL_T0
+KERNEL_T0       200. 
 
 # epicenter distance
 KERNEL_COLAT_MIN   25.

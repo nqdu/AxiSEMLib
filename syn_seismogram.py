@@ -1,7 +1,6 @@
 #from database1 import AxiBasicDB as AxiBasicDB1
 from bak.database import AxiBasicDB
 import numpy as np 
-from obspy import read_events
 import matplotlib.pyplot as plt 
 import os 
 
@@ -14,16 +13,10 @@ db:AxiBasicDB = AxiBasicDB()
 db.read_basic(basedir + "/MZZ/Data/axisem_output.nc4")
 db.set_iodata(basedir)
 
-cmtfile = "/CMTSOLUTION"
-cat = read_events(basedir + cmtfile)[0]
-org = cat.origins[0]
-starttime = org.time
-xs = np.array([org.longitude,org.latitude,org.depth])
-mzz,mxx,myy,mxz,myz,mxy = db.read_cmt(basedir + cmtfile)
-mij = np.array([mxx,myy,mzz,2 * myz,2 * mxz,2 * mxy])
+cmtfile = "CMTSOLUTION"
 
 stacords = np.loadtxt(basedir + "/MZZ/STATIONS",dtype = str)
-t = np.arange(db.nt) * db.dtsamp - db.shift
+t = np.arange(db.nt) * db.dtsamp + db.t0
 nsta = stacords.shape[0]
 
 for i in range(nsta):

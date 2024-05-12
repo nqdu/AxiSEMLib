@@ -21,11 +21,8 @@ def get_wavefield_proc(args):
     db.set_iodata(basedir)
 
     # time vector
-    t0 = np.arange(db.nt) * db.dtsamp - db.shift
-    if tvec is None:
-        t1 = np.arange(20000) * 0.05 - db.shift 
-    else:
-        t1 = tvec - db.shift
+    t0 = np.arange(db.nt) * db.dtsamp + db.t0
+    t1 = tvec.copy()
     nt1 = len(t1)
     dt1 = t1[1] - t1[0]
 
@@ -124,11 +121,8 @@ def get_trac_proc(args):
     stel = -6371000 + r
 
     # create dataset
-    t0 = np.arange(db.nt) * db.dtsamp - db.shift
-    if tvec is None:
-        t1 = np.arange(20000) * 0.05 - db.shift 
-    else:
-        t1 = tvec - db.shift
+    t0 = np.arange(db.nt) * db.dtsamp + db.t0 
+    t1 = tvec.copy()
     nt1 = len(t1)
     dset = f.create_dataset("field",(nt1,len(r),3),dtype=np.float32,chunks=True)
     field = np.zeros((nt1,3),dtype=np.float32)
@@ -180,11 +174,8 @@ def get_displ_proc(args):
     stel = -6371000 + r
 
     # create dataset
-    t0 = np.arange(db.nt) * db.dtsamp - db.shift
-    if tvec is None:
-        t1 = np.arange(20000) * 0.05 - db.shift 
-    else:
-        t1 = tvec - db.shift
+    t0 = np.arange(db.nt) * db.dtsamp + db.t0 
+    t1 = tvec.copy()
     nt1 = len(t1)
     dt1 = t1[1] - t1[0]
     dset = f.create_dataset("field",(nt1,len(r),6),dtype=np.float32,chunks=True)
