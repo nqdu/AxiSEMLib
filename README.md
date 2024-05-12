@@ -35,8 +35,15 @@ Download version 1.4 of [axisem](https://github.com/geodynamics/axisem). And ins
 Move all files of `axisem_files.tar.gz` to `axisem/SOLVER/`.
 
 ## Prepare AxiSEM Files
-In `SOLVER/inparam_advanced`, you should set the several parameters:
+In `SOLVER/inparam_advanced`, you should set the part of several parameters as below:
 ```bash 
+# GLL points to save, starting and ending GLL point index 
+# (overwritten with 0 and npol for dumptype displ_only)
+KERNEL_IBEG         0
+KERNEL_IEND         4
+KERNEL_JBEG         0
+KERNEL_JEND         4
+
 KERNEL_WAVEFIELDS   true
 KERNEL_DUMPTYPE     displ_only
 KERNEL_SPP          8/16/32 (depend on your dominant frequency)
