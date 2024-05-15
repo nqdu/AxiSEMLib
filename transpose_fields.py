@@ -18,8 +18,10 @@ def write_transpose_data(file_r:h5py.File,file_w:h5py.File,
     idx = np.arange(0,ngll,stride)
     ngll_out = len(idx)
 
-    nprocs = MPI.COMM_WORLD.Get_size()
-    myrank = MPI.COMM_WORLD.Get_rank()
+    # mpi rank/nprocs
+    comm = MPI.COMM_WORLD
+    nprocs = comm.Get_size()
+    myrank = comm.Get_rank()
 
     # create temp dataset
     dset3 = file_w.create_dataset(dsetstr + ".tmp",(npts,nt),dtype=np.float32)
@@ -50,12 +52,13 @@ def write_transpose_data(file_r:h5py.File,file_w:h5py.File,
         # write to dset2
         dset3[istart:istart+n,:] = mydata 
 
+    # barrier
+    comm.barrier()
 
     # now we change (ngll_all,nt) to (nspec,ngll_out,ngll_out,nt)
     dset2 = file_w.create_dataset(dsetstr,(nspec,ngll_out,ngll_out,nt),dtype=np.float32)
 
     for ispec in tqdm(range(myrank,nspec,nprocs)):
-        mydata = np.zeros((ngll_out,ngll_out,nt),dtype='f4')
         for iz in range(ngll_out):
             for ix in range(ngll_out):
                 iz1 = idx[iz]
@@ -64,6 +67,7 @@ def write_transpose_data(file_r:h5py.File,file_w:h5py.File,
                 dset2[ispec,iz,ix,:] = dset3[iglob,:] * np.float32(1.)
 
     # close and delete
+    comm.barrier()
     del file_w[dsetstr + ".tmp"]
 
 def main():

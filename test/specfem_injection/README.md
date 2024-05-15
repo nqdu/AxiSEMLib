@@ -8,3 +8,6 @@ where `x/y/z` are Cartesian coordinates for each boundary points with dimension 
 x y z nx ny nz
 ```
 where `x/y/z` are Cartesian coordinates for each boundary points with dimension `m` and `n_x/y/z` are the normal vector ouside the study region. It should be of the shape (nspec_bd,NGLL2)
+
+# OUTPUT
+The program will print `proc*_wavediscon*` files that contain velocity/tractions at each time step. You can set parameters in `create_interfaces.sh`.

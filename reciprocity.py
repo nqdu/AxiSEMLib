@@ -108,7 +108,7 @@ def reciprocity(db:AxiBasicDB,cmtfile):
     data_z = np.loadtxt(name + "Z.dat")
     data_e = np.loadtxt(name + "E.dat")
     data_n = np.loadtxt(name + "N.dat")
-    t = np.arange(db.nt) * db.dtsamp - db.shift
+    t = np.arange(db.nt) * db.dtsamp + db.t0
 
     plt.figure(1,figsize=(14,16))
     plt.subplot(3,1,1)

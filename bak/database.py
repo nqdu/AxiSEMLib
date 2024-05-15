@@ -59,6 +59,7 @@ class AxiBasicDB:
         self.shift = fio.attrs['source shift factor in sec'][0]
         self.nt = len(fio['snapshots'])
         self.nglob = len(fio['gllpoints_all'])
+        self.t0 = fio.attrs['dump_t0']
     
         # read source parameters
         self.evdp = fio.attrs['source depth in km'][0] * 1.
