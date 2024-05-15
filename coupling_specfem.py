@@ -6,15 +6,7 @@ from mpi4py import MPI
 from scipy.interpolate import interp1d 
 import sys 
 from pyproj import Proj
-
-def diff1(u,dt):
-    u1 = u * 0. 
-    nt = len(u)
-    u1[1:nt-1] = (u[2:] - u[0:nt-2]) / (2 * dt)
-    u1[0] = (u[1] - u[0]) / dt 
-    u1[-1] = (u[nt-1] - u[nt-2]) / dt 
-
-    return u1
+from utils import diff1
 
 
 def read_boundary_points(coordir:str,iproc:int):
@@ -39,7 +31,7 @@ def read_boundary_points(coordir:str,iproc:int):
 
 def get_field_proc(args):
     # unpack input paramters
-    iproc,basedir,coordir,outdir,tvec = args
+    iproc,basedir,coordir,outdir,tvec,UTM_ZONE = args
 
     # read database
     db = AxiBasicDB()
@@ -70,7 +62,7 @@ def get_field_proc(args):
         return 0
 
     # convert to spherical coordinates
-    p = Proj(proj='utm',zone=10,ellps='WGS84')
+    p = Proj(proj='utm',zone=UTM_ZONE,ellps='WGS84')
     stlo,stla = p(xx,yy,inverse=True)
     r = zz + 6371000
     stel = -6371000 + r
@@ -121,14 +113,15 @@ def get_field_proc(args):
 
 def main():
     from utils import allocate_task
-    if len(sys.argv) !=7:
-        print("Usage: ./this h5dir coor_dir t0 dt nt outdir")
+    if len(sys.argv) !=8:
+        print("Usage: ./this h5dir coor_dir UTM_ZONE t0 dt nt outdir")
         exit(1)
     basedir = sys.argv[1]
     coordir = sys.argv[2]
-    t0,dt = map(lambda x: float(x),sys.argv[3:5])
-    nt = int(sys.argv[5])
-    outdir = sys.argv[6]
+    UTM_ZONE = int(sys.argv[3])
+    t0,dt = map(lambda x: float(x),sys.argv[4:6])
+    nt = int(sys.argv[6])
+    outdir = sys.argv[7]
     os.system(f'mkdir -p {outdir}')
 
     # mpi 
@@ -152,10 +145,8 @@ def main():
 
     # time window
     t1 = np.arange(nt) * dt + t0
-
-    #basedir = '/home/l/liuqy/nqdu/scratch/axisem/SOLVER/ak135'
     for i in range(startid,endid+1):
-        args = (i,basedir,coordir,outdir,t1)
+        args = (i,basedir,coordir,outdir,t1,UTM_ZONE)
         get_field_proc(args)
     
     MPI.Finalize()
