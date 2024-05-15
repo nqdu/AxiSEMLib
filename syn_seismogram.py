@@ -1,7 +1,5 @@
-#from database1 import AxiBasicDB as AxiBasicDB1
-from bak.database import AxiBasicDB
-import numpy as np 
-import matplotlib.pyplot as plt 
+from database import AxiBasicDB
+import numpy as np
 import os 
 
 basedir = '../SOLVER/ak135_th/'
@@ -23,9 +21,8 @@ for i in range(nsta):
     print(i+1,nsta)
     stla,stlo = np.float32(stacords[i,2:4])
     ue,un,uz = db.syn_seismo(stla,stlo,0.,'enz',basedir + cmtfile)
-    name = stacords[i,0] + "_" + stacords[i,1]
+    name = stacords[i,1] + "." + stacords[i,0]
     newname = "SEISMOGRAMS/" + name
-    dataout = np.zeros((len(un),2)) 
     dataout = np.zeros((len(un),2)) 
     dataout[:,0] = t 
     dataout[:,1] = ue 
