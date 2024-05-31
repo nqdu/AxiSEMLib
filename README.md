@@ -15,10 +15,20 @@ Part of the code are adapted from [Instaseis](https://github.com/krischer/instas
 ```bash
 conda create -n axisem_lib python=3.8 
 conda activate axisem_lib
-conda install numpy scipy numba pyproj
+conda install numpy scipy numba pyproj tqdm
 pip install pybind11-global
 ```
-3. Install [parallel-hdf5](https://support.hdfgroup.org/HDF5/PHDF5/), [mpi4py](https://mpi4py.readthedocs.io/en/stable/install.html) and [h5py-mpi](https://docs.h5py.org/en/stable/mpi.html), and [netcdf-fortran](https://docs.unidata.ucar.edu/netcdf-fortran/current/).
+3. Install several packages:
+* [parallel-hdf5](https://support.hdfgroup.org/HDF5/PHDF5/) using your MPI libraries. 
+* [netcdf-fortran](https://docs.unidata.ucar.edu/netcdf-fortran/current/), only serial version.
+* [mpi4py](https://mpi4py.readthedocs.io/en/stable/install.html): You can build it by using existing mpi libraries:
+```bash 
+MPICC=mpicc pip install mpi4py --no-binary mpi4py
+```
+* [h5py-mpi](https://docs.h5py.org/en/stable/mpi.html) using existing `parallel-hdf5` libraries:
+```bash
+CC="mpicc" HDF5_MPI="ON" HDF5_DIR=/path/to/parallel-hdf5 pip install --no-binary=h5py h5py
+```
 
 4. build `AxiSEMLib` by using:
 ```bash

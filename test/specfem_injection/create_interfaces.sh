@@ -18,4 +18,5 @@ nt=1000
 dt=0.025
 t0=0.  # started from earthquake origin time
 
+# the cores can be different from # of discon files.
 mpirun -np 120 python ../../coupling.py  $axisem_data_dir $coordir $t0 $dt $nt $outdir
