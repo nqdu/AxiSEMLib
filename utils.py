@@ -96,3 +96,21 @@ def allocate_task(ntasks,nprocs,myrank):
     endid = startid + sub_n - 1
 
     return startid,endid
+
+def read_cmtsolution(cmtfile):
+    M = {}
+    with open(cmtfile) as f:
+        for line in f:
+            info = line.strip().split(":")
+            if len(info) == 2:
+                key,value = info 
+
+                if 'M' in key:
+                    M[key] = float(value) * 1.0e-7
+    
+    # get moment tensor
+    mzz = M['Mrr']; mxx = M['Mtt']
+    myy = M['Mpp']; mxz = M['Mrt']
+    myz = M['Mrp']; mxy = M['Mtp']
+
+    return mzz,mxx,myy,mxz,myz,mxy

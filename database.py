@@ -178,11 +178,8 @@ class AxiBasicDB:
         pass
 
     def read_cmt(self,cmtfile:str):
-        from obspy import read_events
-        cat = read_events(cmtfile)[0]
-        tensor = cat.focal_mechanisms[0].moment_tensor.tensor
-        mzz = tensor.m_rr; mxx = tensor.m_tt; myy = tensor.m_pp
-        mxz = tensor.m_rt; myz = tensor.m_rp; mxy = tensor.m_tp
+        from utils import read_cmtsolution
+        mzz,mxx,myy,mxz,myz,mxy = read_cmtsolution(cmtfile)
         mzz,mxx,myy,mxz,myz,mxy = map(lambda x: x / self.mag,[mzz,mxx,myy,mxz,myz,mxy])
 
         return mzz,mxx,myy,mxz,myz,mxy
