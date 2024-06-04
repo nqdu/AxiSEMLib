@@ -16,7 +16,7 @@ coordir=.. # wave_discon_*coordinates
 # time window
 nt=1000
 dt=0.025
-t0=0.  # started from earthquake origin time
+t0=123.4  # t0 = 0. is earthquake origin time
 
 # the cores can be different from # of discon files.
 mpirun -np 120 python ../../coupling.py  $axisem_data_dir $coordir $t0 $dt $nt $outdir
