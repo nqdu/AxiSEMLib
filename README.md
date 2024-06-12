@@ -45,7 +45,7 @@ make -j4; make install
 ## Prepare AxiSEM Mesh
 - Go to directory `axisem` and change compiler options in `make_axisem.macros`. Remember to set `USE_NETCDF = true`, set `NETCDF_PATH`.
 
-- Go to `MESHER/`, set parameters including `DOMINANT_PERIOD` and number of slices in `inparam_mesh`. If you want to use a smoothed version of ak135 model, you can run scripts under `smooth_model/ak135.py`, and set the parameters like:
+- Go to `MESHER/`, set parameters including `DOMINANT_PERIOD` and number of slices in `inparam_mesh`. If you want to use a smoothed version of ak135 model, you can run scripts under `smooth_model/main.py`, and set the parameters like:
 ```bash
 BACKGROUND_MODEL external
 EXT_MODEL ak135.smooth.bm
@@ -72,8 +72,8 @@ KERNEL_DUMPTYPE     displ_only
 KERNEL_SPP          8/16/32 (depend on your dominant frequency)
 
 # you should add this one 
-# KERNEL  dump  after KERNEL_T0
-KERNEL_T0       200. 
+# KERNEL  dump  after DUMP_T0
+DUMP_T0       200. 
 
 # epicenter distance
 KERNEL_COLAT_MIN   25.
