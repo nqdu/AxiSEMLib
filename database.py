@@ -41,6 +41,26 @@ class AxiBasicDB:
         self.mesh_s = fio['Mesh/mesh_S'][:]
         self.mesh_z = fio['Mesh/mesh_Z'][:]
 
+        # elastic moduli
+        self.xmu = fio['Mesh/mesh_mu'][:]
+        self.xlamda = fio['Mesh/mesh_lambda'][:]
+        self.xxi = fio['Mesh/mesh_xi'][:]
+        self.xphi = fio['Mesh/mesh_phi'][:]
+        self.xeta = fio['Mesh/mesh_eta'][:]
+
+        # check if the media contains acoustic elements
+        self.is_elastic = np.zeros((self.nspec),dtype=bool)
+        self.is_elastic[:] = True
+        self.nspec_el = 0
+        self.nspec_ac = 0
+        for ispec in range(self.xmu.shape[0]):
+            if np.mean(self.xmu[ispec,:,:]) < 1.0e-5:
+                self.nspec_ac += 1
+                self.is_elastic[ispec] = False
+            else:
+                self.nspec_el += 1
+
+
         # create kdtree
         md_pts = np.zeros((self.nspec,2))
         md_pts[:,0] = fio['Mesh/mp_mesh_S'][:]
@@ -63,13 +83,8 @@ class AxiBasicDB:
         self.G2 = fio['Mesh/G2'][:].T
         self.G1T = np.require(self.G1.T,requirements=['F_CONTIGUOUS'])
         self.G2T = np.require(self.G2.T,requirements=['F_CONTIGUOUS'])
-
         self.gll = fio['Mesh/gll'][:]
         self.glj = fio['Mesh/glj'][:]
-
-        # elastic moduli
-        self.mu = fio['Mesh/mesh_mu'][:]
-        self.lamda = fio['Mesh/mesh_lambda'][:]
 
         # close file
         fio.close()
@@ -184,7 +199,7 @@ class AxiBasicDB:
 
         return mzz,mxx,myy,mxz,myz,mxy
     
-    def _locate_elem(self,s,z):
+    def _locate_elem(self,s,z,is_el_point = True):
         from sem_funcs import inside_element
         id_elem = None 
 
@@ -337,7 +352,8 @@ class AxiBasicDB:
         stress : np.ndarray
                 shape(6,nt), ess,epp,ezz,epz,esz,esp
         """
-        from sem_funcs import lagrange_interpol_2D_td,strain_td
+        from sem_funcs import lagrange_interpol_2D_td,strain_td,find_theta
+        from utils import c_ijkl_ani
         nt = self.nt 
         fio:h5py.File = self.iodict[stype]
         ngll = fio['disp_s'].shape[1]
@@ -352,13 +368,18 @@ class AxiBasicDB:
             utemp[1,...] = fio['disp_p'][elemid,...]
         utemp = np.transpose(utemp,(3,2,1,0))
 
-        # alloc arrays for mu and lambda
+        # alloc arrays for elastic tensor
         xmu = np.zeros((ngll,ngll),dtype=float)
         xlam = np.zeros((ngll,ngll),dtype=float)
-        xmu[:,:] = self.mu[elemid,:,:]
-        xlam[:,:] = self.lamda[elemid,:,:]
-        xmu = np.transpose(xmu)
-        xlam = np.transpose(xlam)
+        xxi = xlam * 1. 
+        xphi = xlam * 1. 
+        xeta = xlam * 1.
+        xmu[:,:] = self.xmu[elemid,:,:]; xlam[:,:] = self.xlamda[elemid,:,:]
+        xxi[:,:] = self.xxi[elemid,:,:]; xphi[:,:] = self.xphi[elemid,:,:]
+        xeta[:,:] = self.xeta[elemid,:,:]
+        xmu = np.transpose(xmu); xlam = np.transpose(xlam)
+        xxi = np.transpose(xxi); xphi = np.transpose(xphi)
+        xeta = np.transpose(xeta)
 
         # gll/glj array
         sgll = self.gll
@@ -383,17 +404,40 @@ class AxiBasicDB:
 
         # compute strain shape(nt,npol+1,npol+1,6)
         etype = self._get_excitation_type(stype)
-        strain = strain_td(utemp,G,GT,sgll,zgll,ngll-1,self.nt,
+        e = strain_td(utemp,G,GT,sgll,zgll,ngll-1,self.nt,
                             skel,eltype,self.axis[elemid]==1,etype)
+        
+        # find theta
+        theta = find_theta(sgll,zgll,skel,eltype)
+
+        # get elastic tensor c21
+        c11 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 1, 1)
+        c12 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 2, 2)
+        c13 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 3)
+        c15 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 1)
+        c22 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 2, 2)
+        c23 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 3)
+        c25 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 1)
+        c33 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 3)
+        c35 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 1)
+        c44 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 2, 3)
+        c46 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 1, 2)
+        c55 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 1, 3, 1)
+        c66 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 2, 1, 2)
+        c14 = 0.; c26 = 0.; c36 = 0.; c24 = 0.
+        c16 = 0.; c45 = 0.; c56 = 0.; c34 = 0.
 
         # compute stress
-        stress = strain * 0.
-        stress[...,0] = (xlam + 2 * xmu) * strain[...,0] + xlam * (strain[...,1] + strain[...,2])
-        stress[...,1] = (xlam + 2 * xmu) * strain[...,1] + xlam * (strain[...,0] + strain[...,2])
-        stress[...,2] = (xlam + 2 * xmu) * strain[...,2] + xlam * (strain[...,0] + strain[...,1])
-        stress[...,3] = 2. * xmu * strain[...,3]
-        stress[...,4] = 2. * xmu * strain[...,4]
-        stress[...,5] = 2. * xmu * strain[...,5]
+        stress = e * 0.
+        e[..., 3:6] = 2. * e[...,3:6]
+
+        # Compute stress components explicitly using Voigt notation
+        stress[..., 0] = c11 * e[..., 0] + c16 * e[..., 5] + c12 * e[..., 1] + c15 * e[..., 4] + c14 * e[..., 3] + c13 * e[..., 2]  # sxx → s[..., 0]
+        stress[..., 1] = c12 * e[..., 0] + c26 * e[..., 5] + c22 * e[..., 1] + c25 * e[..., 4] + c24 * e[..., 3] + c23 * e[..., 2]  # syy → s[..., 1]
+        stress[..., 2] = c13 * e[..., 0] + c36 * e[..., 5] + c23 * e[..., 1] + c35 * e[..., 4] + c34 * e[..., 3] + c33 * e[..., 2]  # szz → s[..., 2]
+        stress[..., 3] = c14 * e[..., 0] + c46 * e[..., 5] + c24 * e[..., 1] + c45 * e[..., 4] + c44 * e[..., 3] + c34 * e[..., 2]  # syz → s[..., 3]
+        stress[..., 4] = c15 * e[..., 0] + c56 * e[..., 5] + c25 * e[..., 1] + c55 * e[..., 4] + c45 * e[..., 3] + c35 * e[..., 2]  # sxz → s[..., 4]
+        stress[..., 5] = c16 * e[..., 0] + c66 * e[..., 5] + c26 * e[..., 1] + c56 * e[..., 4] + c46 * e[..., 3] + c36 * e[..., 2]  # sxy → s[..., 5]
 
         # interpolate 
         # es shape(6,nt)

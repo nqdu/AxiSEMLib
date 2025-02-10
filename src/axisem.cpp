@@ -6,6 +6,7 @@ namespace py = pybind11;
 using py::arg;
 
 typedef py::array_t<double> dmat;
+typedef py::array_t<int> imat;
 
 extern "C"{
 
@@ -39,6 +40,7 @@ void lagrange_interpol_2D_td(int N, int nsamp, const double *points1,
                                     const double *points2,const double *coefficients, 
                                     double x1, double x2, double *interpolant);
 
+double get_theta(double xi, double eta, const double *nodes, int element_type);
 
 }
 
@@ -92,6 +94,22 @@ dmat lagrange_2D(const dmat &points1,const dmat &points2,
     return out;
 }
 
+dmat find_theta(const dmat &xi, const dmat &eta,const dmat &nodes,int eltype)
+{
+    int ngll = xi.size();
+    py::array_t<double,py::array::f_style> theta; theta.resize({ngll,ngll});
+    auto theta0 = theta.mutable_unchecked<2>();
+    auto xi0 = xi.unchecked<1>();
+    auto eta0 = eta.unchecked<1>();
+    for(int i = 0; i < ngll; i ++ ) {
+        for(int j = 0; j < ngll; j ++) {
+            theta0(i,j) = get_theta(xi0(i),eta0(j),nodes.data(),eltype);
+        }
+    }
+
+    return theta;
+}
+
 PYBIND11_MODULE(libsem,m){
     m.doc() = "Axisem functions\n";
     m.def("inside_element_warp",&inside_element_warp,arg("s"), arg("z"), arg("nodes"),
@@ -104,5 +122,7 @@ PYBIND11_MODULE(libsem,m){
 
     m.def("lagrange_2D",&lagrange_2D,arg("points1"), arg("points2"), arg("coefs"),
           arg("x1"), arg("x2"),"lagrange_2D c++ wrapper");
+
+    m.def("find_theta",&find_theta,arg("xi"),arg("eta"),arg("nodes"),arg("eltype"));
 }
 
