@@ -84,7 +84,8 @@ KERNEL_COLAT_MAX   100.
 KERNEL_RMIN        5000.
 KERNEL_RMAX        6372.
 ```
-Then you can prepare your `CMTSOLUTION` and `STATIONS`
+Then you can prepare your `CMTSOLUTION` and `STATIONS`. You can follow examples in `run_all_events.sh`, which will submit
+all events in `CMT_DIR`
 
 ## Run AxiSEM simulation
 Run it on your cluster.
