@@ -58,3 +58,10 @@ def strain_td(u, G, GT, xi, eta, npol, nsamp, nodes, element_type, axial,stype="
     strain = np.reshape(strain,(nsamp, npol + 1, npol + 1, 6),order='F')
 
     return strain 
+
+def find_theta(xi,eta,nodes,element_type) -> np.ndarray :
+    xi = np.require(xi, dtype=np.float64, requirements=["F_CONTIGUOUS"])
+    eta = np.require(eta, dtype=np.float64, requirements=["F_CONTIGUOUS"])
+    nodes = np.require(nodes, dtype=np.float64, requirements=["F_CONTIGUOUS"])
+
+    return libsem.find_theta(xi,eta,nodes,element_type)

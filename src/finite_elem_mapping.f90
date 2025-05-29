@@ -173,6 +173,24 @@ function mapping(xi, eta, nodes, element_type)
 end function mapping
 !-----------------------------------------------------------------------------------------
 
+function get_theta(xi, eta, nodes, element_type) bind(c,name='get_theta') result(theta) 
+   implicit none
+   real(c_double),value :: xi,eta 
+   real(c_double),intent(in) :: nodes(4,2)
+   integer(c_int),value :: element_type 
+
+   ! return type
+   real(c_double) :: theta 
+
+   !local 
+   real(c_double) :: cords(2)
+   cords = mapping(xi,eta,nodes,element_type)
+
+   ! compute theta
+   theta = acos(cords(2) / sqrt(sum(cords**2)))
+
+end function get_theta
+
 !-----------------------------------------------------------------------------------------
 function jacobian(xi, eta, nodes, element_type)
 
