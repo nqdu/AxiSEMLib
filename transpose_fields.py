@@ -58,7 +58,8 @@ def write_transpose_data(file_r:h5py.File,file_w:h5py.File,
     # now we change (ngll_all,nt) to (nspec,ngll_out,ngll_out,nt)
     dset2 = file_w.create_dataset(dsetstr,(nspec,ngll_out,ngll_out,nt),dtype=np.float32)
 
-    for ispec in tqdm(range(myrank,nspec,nprocs)):
+    istart,iend = allocate_task(nspec,nprocs,myrank)
+    for ispec in tqdm(range(istart,iend+1)):
         for iz in range(ngll_out):
             for ix in range(ngll_out):
                 iz1 = idx[iz]
