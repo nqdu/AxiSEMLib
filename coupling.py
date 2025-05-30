@@ -34,9 +34,8 @@ def get_wavefield_proc(args):
         npts = len(r)
     else:
         npts = 0
-    f = h5py.File("%s/displ_proc%06d.h5"%(outdir,iproc),"w")
-    dset_d = f.create_dataset("displ",(nt1,npts,3),dtype=np.float32,chunks=True)
-    dset_a = f.create_dataset("accel",(nt1,npts,3),dtype=np.float32,chunks=True)
+    displ = np.zeros((nt1,npts,3),dtype=np.float32)
+    accel = np.zeros((nt1,npts,3),dtype=np.float32)
 
     # compute displ/accel on the injection boundaries
     print(f"synthetic displ/accel for {file_disp} ...")
@@ -47,14 +46,13 @@ def get_wavefield_proc(args):
         ux = interp1d(t0,ux1,bounds_error=False,fill_value=0.)(t1)
         uy = interp1d(t0,uy1,bounds_error=False,fill_value=0.)(t1)
         uz = interp1d(t0,uz1,bounds_error=False,fill_value=0.)(t1)
-        dset_d[:,ir,0] = np.float32(ux)
-        dset_d[:,ir,1] = np.float32(uy)
-        dset_d[:,ir,2] = np.float32(uz)
+        displ[:,ir,0] = np.float32(ux)
+        displ[:,ir,1] = np.float32(uy)
+        displ[:,ir,2] = np.float32(uz)
 
-        dset_a[:,ir,0] = diff1(diff1(ux,dt1),dt1)
-        dset_a[:,ir,1] = diff1(diff1(uy,dt1),dt1)
-        dset_a[:,ir,2] = diff1(diff1(uz,dt1),dt1)
-    f.close()
+        accel[:,ir,0] = diff1(diff1(ux,dt1),dt1)
+        accel[:,ir,1] = diff1(diff1(uy,dt1),dt1)
+        accel[:,ir,2] = diff1(diff1(uz,dt1),dt1)
 
     # compute traction on the injection boundaries
     if os.path.getsize(file_trac) != 0:
@@ -64,8 +62,7 @@ def get_wavefield_proc(args):
         npts = len(r)
     else:
         npts = 0
-    f1 = h5py.File("%s/traction_proc%06d.h5"%(outdir,iproc),"w")
-    dset_t = f1.create_dataset("trac",(nt1,npts,3),dtype=np.float32,chunks=True)
+    tract = np.zeros((nt1,npts,3),dtype=np.float32)
     print(f"synthetic traction for {file_trac} ...")
 
     for ir in range(npts):
@@ -78,27 +75,17 @@ def get_wavefield_proc(args):
         Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz 
         Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz 
 
-        dset_t[:,ir,0] = interp1d(t0,Tx,bounds_error=False,fill_value=0.)(t1)
-        dset_t[:,ir,1] = interp1d(t0,Ty,bounds_error=False,fill_value=0.)(t1)
-        dset_t[:,ir,2] = interp1d(t0,Tz,bounds_error=False,fill_value=0.)(t1)
-        
-    f1.close()
+        tract[:,ir,0] = interp1d(t0,Tx,bounds_error=False,fill_value=0.)(t1)
+        tract[:,ir,1] = interp1d(t0,Ty,bounds_error=False,fill_value=0.)(t1)
+        tract[:,ir,2] = interp1d(t0,Tz,bounds_error=False,fill_value=0.)(t1)
 
     # write final binary for specfem_injection
-    f = h5py.File("%s/displ_proc%06d.h5"%(outdir,iproc),"r")
-    f1 = h5py.File("%s/traction_proc%06d.h5"%(outdir,iproc),"r")
     fileio = FortranFile(outbin,"w")
     for it in range(nt1):
-        fileio.write_record(f['displ'][it,:,:])
-        fileio.write_record(f['accel'][it,:,:])
-        fileio.write_record(f1['trac'][it,:,:])
+        fileio.write_record(np.float32(displ[it,:,:]))
+        fileio.write_record(np.float32(accel[it,:,:]))
+        fileio.write_record(np.float32(tract[it,:,:]))
     fileio.close()
-    f.close()
-    f1.close()
-
-    # remove h5 file
-    os.remove("%s/displ_proc%06d.h5"%(outdir,iproc))
-    os.remove("%s/traction_proc%06d.h5"%(outdir,iproc))
 
 def get_trac_proc(args):
     iproc,basedir,coordir,outdir,tvec = args
