@@ -82,9 +82,9 @@ def get_wavefield_proc(args):
     # write final binary for specfem_injection
     fileio = FortranFile(outbin,"w")
     for it in range(nt1):
-        fileio.write_record(displ[it,:,:])
-        fileio.write_record(accel[it,:,:])
-        fileio.write_record(tract[it,:,:])
+        fileio.write_record(np.float32(displ[it,:,:]))
+        fileio.write_record(np.float32(accel[it,:,:]))
+        fileio.write_record(np.float32(tract[it,:,:]))
     fileio.close()
 
 def get_trac_proc(args):
