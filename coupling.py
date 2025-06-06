@@ -227,4 +227,5 @@ def main():
     
     MPI.Finalize()
 
-main()
+if __name__ == "__main__":
+    main()

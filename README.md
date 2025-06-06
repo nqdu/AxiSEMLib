@@ -90,10 +90,10 @@ all events in `CMT_DIR`
 ## Run AxiSEM simulation
 Run it on your cluster.
 
-## Transpose the output field.
+## Transpose the output field for better performance.
 Set the variables in `submit_transpose.sh`, then:
 ```bash
 bash submit_transpose.sh 
 ```
 
-## Check examples in `test/` !
+## Try examples in `EXAMPLES/` !
