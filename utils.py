@@ -140,23 +140,23 @@ def c_ijkl_ani(lambda_, mu, xi_ani, phi_ani, eta_ani, theta_fa, phi_fa, i1, j1, 
     s[1,...] = np.sin(phi_fa) * np.sin(theta_fa)
     s[2,...] = np.cos(theta_fa)
     
-    # Initialize c_ijkl_ani
-    c_ijkl_ani = np.zeros(lambda_.shape)
+    # Initialize c_ijkl
+    c_ijkl = np.zeros(lambda_.shape)
     
     # Isotropic part
-    c_ijkl_ani += lambda_ * deltaf[i, j] * deltaf[k, l]
-    c_ijkl_ani += mu * (deltaf[i, k] * deltaf[j, l] + deltaf[i, l] * deltaf[j, k])
+    c_ijkl += lambda_ * deltaf[i, j] * deltaf[k, l]
+    c_ijkl += mu * (deltaf[i, k] * deltaf[j, l] + deltaf[i, l] * deltaf[j, k])
     
     # Anisotropic part
-    c_ijkl_ani += ((eta_ani - one) * lambda_ + two * eta_ani * mu * (one - one / xi_ani)) * \
+    c_ijkl += ((eta_ani - one) * lambda_ + two * eta_ani * mu * (one - one / xi_ani)) * \
                   (deltaf[i, j] * s[k] * s[l] + deltaf[k, l] * s[i] * s[j])
     
-    c_ijkl_ani += mu * (one / xi_ani - one) * \
+    c_ijkl += mu * (one / xi_ani - one) * \
                   (deltaf[i, k] * s[j] * s[l] + deltaf[i, l] * s[j] * s[k] +
                    deltaf[j, k] * s[i] * s[l] + deltaf[j, l] * s[i] * s[k])
     
-    c_ijkl_ani += ((one - two * eta_ani + phi_ani) * (lambda_ + two * mu) +
+    c_ijkl += ((one - two * eta_ani + phi_ani) * (lambda_ + two * mu) +
                    (4.0 * eta_ani - 4.0) * mu / xi_ani) * \
                   (s[i] * s[j] * s[k] * s[l])
     
-    return c_ijkl_ani
+    return c_ijkl
