@@ -6,7 +6,7 @@ from mpi4py import MPI
 from scipy.interpolate import interp1d 
 import sys 
 from pyproj import Proj
-from utils import diff1
+from utils import diff1,prefilt_interp
 
 
 def read_boundary_points(coordir:str,iproc:int):
@@ -29,7 +29,13 @@ def read_boundary_points(coordir:str,iproc:int):
 
     return xx,yy,zz,nnx,nny,nnz 
 
-def get_field_proc(args):
+def get_field_proc(args,inp_method ='savgol'):
+
+    # snity check
+    if inp_method not in ['savgol','linear']:
+        print("Error: inp_method should be 'savgol' or 'linear'")
+        return -1
+
     # unpack input paramters
     iproc,basedir,coordir,outdir,tvec,UTM_ZONE = args
 
@@ -67,6 +73,7 @@ def get_field_proc(args):
     r = zz + 6371000
     stel = -6371000 + r
 
+    method = inp_method  # 'savgol' or 'linear'
     if iproc == 0: print("synthetic traction/velocity ...")
     for ir in range(npts):
         #print(f"synthetic traction for point {ir+1} of {npts} in proc {iproc} ...")
@@ -87,12 +94,19 @@ def get_field_proc(args):
         ux,uy,uz = db.syn_seismo(stla[ir],stlo[ir],stel[ir],'enz',basedir + '/CMTSOLUTION')
 
         # get velocity
-        ux = interp1d(t0,ux,bounds_error=False,fill_value=0.)(t1)
-        uy = interp1d(t0,uy,bounds_error=False,fill_value=0.)(t1)
-        uz = interp1d(t0,uz,bounds_error=False,fill_value=0.)(t1)
-        veloc_axi[:,ir,0] = diff1(ux,dt1)
-        veloc_axi[:,ir,1] = diff1(uy,dt1)
-        veloc_axi[:,ir,2] = diff1(uz,dt1)
+        _,veloc_axi[:,ir,0] = prefilt_interp(t0,ux,t1,
+                                            method=method,
+                                            fmax=1./db.dominant_T0,
+                                            deriv=1)
+        _,veloc_axi[:,ir,1] = prefilt_interp(t0,uy,t1,
+                                            method=method,
+                                            fmax=1./db.dominant_T0,
+                                            deriv=1)
+        _,veloc_axi[:,ir,2] = prefilt_interp(t0,uz,t1,
+                                            method=method,
+                                            fmax=1./db.dominant_T0,
+                                            deriv=1)
+                                             
 
         # traction
         nx = nnx[ir]; ny = nny[ir]; nz = nnz[ir]
@@ -100,9 +114,18 @@ def get_field_proc(args):
         Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz 
         Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz 
 
-        trac_axi[:,ir,0] = interp1d(t0,Tx,bounds_error=False,fill_value=0.)(t1)
-        trac_axi[:,ir,1] = interp1d(t0,Ty,bounds_error=False,fill_value=0.)(t1)
-        trac_axi[:,ir,2] = interp1d(t0,Tz,bounds_error=False,fill_value=0.)(t1)
+        trac_axi[:,ir,0],_ = prefilt_interp(t0,Tx,t1,
+                                        method=method,
+                                        fmax=1./db.dominant_T0,
+                                        deriv=0)
+        trac_axi[:,ir,1],_ = prefilt_interp(t0,Ty,t1,
+                                        method=method,
+                                        fmax=1./db.dominant_T0,
+                                        deriv=0)
+        trac_axi[:,ir,2],_ = prefilt_interp(t0,Tz,t1,
+                                        method=method,
+                                        fmax=1./db.dominant_T0,
+                                        deriv=0)    
 
     # write file
     for i in range(nt1):
@@ -151,4 +174,5 @@ def main():
     
     MPI.Finalize()
 
-main()
+if __name__ == "__main__":
+    main()

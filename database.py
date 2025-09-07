@@ -25,7 +25,8 @@ class AxiBasicDB:
         self.nt = len(fio['snapshots'])
         self.nglob = len(fio['gllpoints_all'])
         self.t0 = fio.attrs['dump_t0']
-    
+        self.dominant_T0 = fio.attrs['dominant source period'][0]
+
         # read source parameters
         self.evdp = fio.attrs['source depth in km'][0] * 1.
         evcola = fio.attrs['Source colatitude'][0]

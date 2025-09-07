@@ -6,9 +6,17 @@ from mpi4py import MPI
 from scipy.interpolate import interp1d 
 import sys 
 from utils import cart2sph,diff1,allocate_task
+from utils import prefilt_interp
 from scipy.io import FortranFile
 
-def get_wavefield_proc(args):
+
+def get_wavefield_proc(args,intp_method='savgol'):
+
+    # sanity check
+    if intp_method not in ['savgol','linear']:
+        print("Error: intp_method should be 'savgol' or 'linear'")
+        return -1
+
     iproc,basedir,coordir,outdir,tvec = args
     datadir = coordir
     file_trac = datadir + "proc%06d_wavefield_discontinuity_faces"%iproc
@@ -34,25 +42,30 @@ def get_wavefield_proc(args):
         npts = len(r)
     else:
         npts = 0
-    displ = np.zeros((nt1,npts,3),dtype=np.float32)
-    accel = np.zeros((nt1,npts,3),dtype=np.float32)
+    displ = np.zeros((nt1,npts,3),dtype='f4')
+    accel = np.zeros((nt1,npts,3),dtype='f4')
 
     # compute displ/accel on the injection boundaries
+    method = intp_method  # 'savgol' or 'linear'
     print(f"synthetic displ/accel for {file_disp} ...")
     for ir in range(npts):
         #print(f"synthetic displ/accel for point {ir+1} in proc {iproc} ...")
         ux1,uy1,uz1 = db.syn_seismo(stla[ir],stlo[ir],stel[ir],'xyz',basedir + '/CMTSOLUTION')
 
-        ux = interp1d(t0,ux1,bounds_error=False,fill_value=0.)(t1)
-        uy = interp1d(t0,uy1,bounds_error=False,fill_value=0.)(t1)
-        uz = interp1d(t0,uz1,bounds_error=False,fill_value=0.)(t1)
-        displ[:,ir,0] = np.float32(ux)
-        displ[:,ir,1] = np.float32(uy)
-        displ[:,ir,2] = np.float32(uz)
-
-        accel[:,ir,0] = diff1(diff1(ux,dt1),dt1)
-        accel[:,ir,1] = diff1(diff1(uy,dt1),dt1)
-        accel[:,ir,2] = diff1(diff1(uz,dt1),dt1)
+        # interpolate to t1 
+        
+        displ[:,ir,0],accel[:,ir,0] = prefilt_interp(t0,ux1,t1,
+                                                     method=method,
+                                                     fmax=1./db.dominant_T0,
+                                                     deriv=2)
+        displ[:,ir,1],accel[:,ir,1] = prefilt_interp(t0,uy1,t1,
+                                                     method=method,
+                                                     fmax=1./db.dominant_T0,
+                                                     deriv=2)
+        displ[:,ir,2],accel[:,ir,2] = prefilt_interp(t0,uz1,t1,
+                                                     method=method,
+                                                     fmax=1./db.dominant_T0,
+                                                     deriv=2)
 
     # compute traction on the injection boundaries
     if os.path.getsize(file_trac) != 0:
@@ -62,7 +75,7 @@ def get_wavefield_proc(args):
         npts = len(r)
     else:
         npts = 0
-    tract = np.zeros((nt1,npts,3),dtype=np.float32)
+    tract = np.zeros((nt1,npts,3),dtype='f4')
     print(f"synthetic traction for {file_trac} ...")
 
     for ir in range(npts):
@@ -75,16 +88,28 @@ def get_wavefield_proc(args):
         Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz 
         Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz 
 
-        tract[:,ir,0] = interp1d(t0,Tx,bounds_error=False,fill_value=0.)(t1)
-        tract[:,ir,1] = interp1d(t0,Ty,bounds_error=False,fill_value=0.)(t1)
-        tract[:,ir,2] = interp1d(t0,Tz,bounds_error=False,fill_value=0.)(t1)
+        tract[:,ir,0],_ = prefilt_interp(t0,Tx,t1,
+                                        method=method,
+                                        fmax=1./db.dominant_T0,
+                                        deriv=0)
+        tract[:,ir,1],_ = prefilt_interp(t0,Ty,t1,
+                                        method=method,
+                                        fmax=1./db.dominant_T0,
+                                        deriv=0)
+        tract[:,ir,2],_ = prefilt_interp(t0,Tz,t1,
+                                        method=method,
+                                        fmax=1./db.dominant_T0,
+                                        deriv=0)
 
     # write final binary for specfem_injection
+    displ = displ.astype('f4')
+    accel = accel.astype('f4')
+    tract = tract.astype('f4')
     fileio = FortranFile(outbin,"w")
     for it in range(nt1):
-        fileio.write_record(np.float32(displ[it,:,:]))
-        fileio.write_record(np.float32(accel[it,:,:]))
-        fileio.write_record(np.float32(tract[it,:,:]))
+        fileio.write_record(displ[it,:,:])
+        fileio.write_record(accel[it,:,:])
+        fileio.write_record(tract[it,:,:])
     fileio.close()
 
 def get_trac_proc(args):

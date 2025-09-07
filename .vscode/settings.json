@@ -1,5 +1,10 @@
 {
     "files.associations": {
         "tuple": "cpp"
-    }
-}
+    },
+    
+    "fortran.linter.modOutput": "/home/nqdu/code/python/AxiSEMLib/.vscode/lib",
+    "fortran.linter.includePaths": [
+        "/home/nqdu/software/netcdf/serial/include",
+        "/opt/openmpi-5.0.6//lib",
+    ]
