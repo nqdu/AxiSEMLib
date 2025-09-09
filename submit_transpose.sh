@@ -6,7 +6,7 @@
 #SBATCH --mem=0
 
 # load your own libs
-module load gcc openmpi python/3.9.8 parallel-hdf5/gcc-8.3.0
+module load fwi/gcc hdf5-mpi
 
 # solver dir
 axisem_data_dir=.. # like /path/to/axisem/SOLVER/ak135

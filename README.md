@@ -45,7 +45,7 @@ make -j4; make install
 ## Prepare AxiSEM Mesh
 - Go to directory `axisem` and change compiler options in `make_axisem.macros`. Remember to set `USE_NETCDF = true`, set `NETCDF_PATH`.
 
-- Go to `MESHER/`, set parameters including `DOMINANT_PERIOD` and number of slices in `inparam_mesh`. If you want to use a smoothed version of ak135 model, you can run scripts under `smooth_model/main.py`, and set the parameters like:
+- Go to `MESHER/`, set parameters including `DOMINANT_PERIOD` and number of slices in `inparam_mesh`. Please make sure this dominant period is slightly shorter than the minimum period used in SEM(you can find it in `SPECFEM`'s `output_generate_databases.txt`) If you want to use a smoothed version of ak135/prem model, you can run scripts under `smooth_model/main.py`, and set the parameters like:
 ```bash
 BACKGROUND_MODEL external
 EXT_MODEL ak135.smooth.bm

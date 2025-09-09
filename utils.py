@@ -80,6 +80,100 @@ def diff1(u,dt):
 
     return u1
 
+def prefilt_interp(t, u, t_new,
+                method='savgol',  # 'savgol' or 'linear'
+                fmax=0.25,        # Hz: max reliable freq of target solver
+                sg_alpha=0.6,     # Savitzky–Golay window ~ fraction of a cycle
+                sg_poly=5,
+                deriv=0):       # Savitzky–Golay poly order (>=3)
+    """
+    Interpolate f(t) -> f, f', f'' on t_new.
+    Outside original domain: zeros.
+    Steps:
+      1. IIR low-pass filter (zero-phase) (for sg filter, or directly return linear interp)
+      2. Interpolate to uniform t_new.
+      3. Savitzky-Golay differentiation for f', f''.
+    """
+
+    from scipy.signal import sosfiltfilt,butter,detrend, savgol_filter
+    from scipy.interpolate import interp1d
+
+    # santity check
+    if deriv not in [0, 1, 2]:
+        print("Error: deriv should be 0, 1, or 2")
+        return None, None
+
+    if method != 'savgol':
+        f = interp1d(t, u, kind='linear',
+                     bounds_error=False, fill_value=0.0)
+        f0 = f(t_new)
+
+        if deriv == 2:
+            dt1 = t_new[1] - t_new[0]
+            f2 = diff1(diff1(f0, dt1), dt1)
+        elif deriv == 1:
+            dt1 = t_new[1] - t_new[0]
+            f2 = diff1(f0, dt1)
+        else:
+            f2 = None
+
+        return f0, f2
+
+    t = np.asarray(t); f = np.asarray(u)
+    dt_src = t[1] - t[0]
+    fs_src = 1.0 / dt_src
+
+    # detrend/demean
+    f = f - np.mean(f)
+    f = detrend(f, type='linear')
+
+    # taper
+    taper_frac = 0.05
+    m = int(np.floor(taper_frac * len(f)))  # number of points tapered at each end
+    window = np.ones(len(f))
+    if m > 0:
+        hann = np.hanning(2*m)
+        window[:m] = hann[:m]
+        window[-m:] = hann[m:]
+    f = f * window 
+
+    # --- 1. IIR low-pass on source grid ---
+    sos = butter(4, fmax, btype='low', fs=fs_src, output='sos')
+    f_lp = sosfiltfilt(sos, f)
+
+    # taper again
+    taper_frac = 0.03
+    window = window * 0 + 1. 
+    m = int(np.floor(taper_frac * len(f_lp)))  # number of points tapered at each end
+    if m > 0:
+        hann = np.hanning(2*m)
+        window[:m] = hann[:m]
+        window[-m:] = hann[m:]
+    f_lp = f_lp * window
+
+    # --- 2. Interpolate to new grid ---
+    interp_fun = interp1d(t, f_lp, kind='linear',
+                          bounds_error=False, fill_value=0.0)
+    f_res = interp_fun(t_new)
+
+    # --- 3. Savitzky–Golay differentiation on final grid ---
+    dx = t_new[1] - t_new[0]
+    fc = fmax
+    win = int(np.round(sg_alpha * (1.0 / (fc * dx))))  # ~0.5–1.0 cycles of fc
+    if win % 2 == 0: win += 1
+    win = max(win, sg_poly + 2 + (sg_poly % 2 == 0))   # valid odd length
+
+    f0 = savgol_filter(f_res, window_length=win, polyorder=sg_poly,
+                       deriv=0, delta=dx, mode='interp')
+
+    if deriv == 0:
+        f2 = None
+    else:
+        f2 = savgol_filter(f_res, winow_length=win, polyorder=sg_poly,
+                           deriv=deriv, delta=dx, mode='interp')
+
+    return f0, f2
+
 def allocate_task(ntasks,nprocs,myrank):
     sub_n = ntasks // nprocs
     num_larger_procs = ntasks - nprocs * sub_n
@@ -140,23 +234,23 @@ def c_ijkl_ani(lambda_, mu, xi_ani, phi_ani, eta_ani, theta_fa, phi_fa, i1, j1, 
     s[1,...] = np.sin(phi_fa) * np.sin(theta_fa)
     s[2,...] = np.cos(theta_fa)
     
-    # Initialize c_ijkl_ani
-    c_ijkl_ani = np.zeros(lambda_.shape)
+    # Initialize c_ijkl
+    c_ijkl = np.zeros(lambda_.shape)
     
     # Isotropic part
-    c_ijkl_ani += lambda_ * deltaf[i, j] * deltaf[k, l]
-    c_ijkl_ani += mu * (deltaf[i, k] * deltaf[j, l] + deltaf[i, l] * deltaf[j, k])
+    c_ijkl += lambda_ * deltaf[i, j] * deltaf[k, l]
+    c_ijkl += mu * (deltaf[i, k] * deltaf[j, l] + deltaf[i, l] * deltaf[j, k])
     
     # Anisotropic part
-    c_ijkl_ani += ((eta_ani - one) * lambda_ + two * eta_ani * mu * (one - one / xi_ani)) * \
+    c_ijkl += ((eta_ani - one) * lambda_ + two * eta_ani * mu * (one - one / xi_ani)) * \
                   (deltaf[i, j] * s[k] * s[l] + deltaf[k, l] * s[i] * s[j])
     
-    c_ijkl_ani += mu * (one / xi_ani - one) * \
+    c_ijkl += mu * (one / xi_ani - one) * \
                   (deltaf[i, k] * s[j] * s[l] + deltaf[i, l] * s[j] * s[k] +
                    deltaf[j, k] * s[i] * s[l] + deltaf[j, l] * s[i] * s[k])
     
-    c_ijkl_ani += ((one - two * eta_ani + phi_ani) * (lambda_ + two * mu) +
+    c_ijkl += ((one - two * eta_ani + phi_ani) * (lambda_ + two * mu) +
                    (4.0 * eta_ani - 4.0) * mu / xi_ani) * \
                   (s[i] * s[j] * s[k] * s[l])
     
-    return c_ijkl_ani
+    return c_ijkl
