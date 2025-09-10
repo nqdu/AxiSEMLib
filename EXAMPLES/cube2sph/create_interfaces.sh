@@ -17,6 +17,7 @@ coordir=.. # wave_discon_*coordinates
 nt=1000
 dt=0.025
 t0=123.4  # t0 = 0. is earthquake origin time
+downsample=0  # if 1, downsample to dominating period of axisem mesh T0/2 
 
 # the cores can be different from # of discon files.
-mpirun -np 120 python ../../coupling.py  $axisem_data_dir $coordir $t0 $dt $nt $outdir
+mpirun -np 120 python ../../coupling.py  $axisem_data_dir $coordir  $outdir $t0 $dt $nt $downsample

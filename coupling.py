@@ -17,7 +17,7 @@ def get_wavefield_proc(args,intp_method='savgol'):
         print("Error: intp_method should be 'savgol' or 'linear'")
         return -1
 
-    iproc,basedir,coordir,outdir,tvec = args
+    iproc,basedir,coordir,outdir,tvec,downsample_to_T0 = args
     datadir = coordir
     file_trac = datadir + "proc%06d_wavefield_discontinuity_faces"%iproc
     file_disp = datadir + "proc%06d_wavefield_discontinuity_points"%iproc
@@ -32,7 +32,27 @@ def get_wavefield_proc(args,intp_method='savgol'):
     t0 = np.arange(db.nt) * db.dtsamp + db.t0
     t1 = tvec.copy()
     nt1 = len(t1)
-    dt1 = t1[1] - t1[0]
+    if downsample_to_T0:
+        dt_dsmp = db.dominant_T0 / 2. # Nyquist freq = 1/T0
+        nt1 = int((t1[-1] - t1[0]) / dt_dsmp) + 1
+
+        # slightly lengthen t1 to [t1[0] - dt_dsmp, t1[-1] + dt_dsmp]
+        tnew = np.arange(nt1 + 2) * dt_dsmp + t1[0] - dt_dsmp
+        t1 = tnew.copy()
+        nt1 = len(t1)
+
+        # write info
+        if iproc == 0:
+            fio = open(outdir + "/wavefield_discontinuity_info.txt","w")
+            fio.write("%f\n" % (dt_dsmp))
+            fio.write("%d\n" % (nt1))
+            fio.close()
+    else: 
+        # sanity check
+        if os.path.exists(outdir + "/wavefield_discontinuity_info.txt"):
+            # remove it 
+            os.remove(outdir + "/wavefield_discontinuity_info.txt")
+
 
     # create datafile for displ/accel
     if os.path.getsize(file_disp) != 0:
@@ -217,14 +237,15 @@ def get_displ_proc(args):
 
 def main():
     # check input 
-    if len(sys.argv) !=7:
-        print("Usage: ./this h5dir coor_dir t0 dt nt outdir")
+    if len(sys.argv) !=8 and len(sys.argv) !=7:
+        print("Usage: ./this h5dir coor_dir outdir t0 dt nt [downsample=0]")
         exit(1)
-    basedir = sys.argv[1]
-    coordir = sys.argv[2]
-    t0,dt = map(lambda x: float(x),sys.argv[3:5])
-    nt = int(sys.argv[5])
-    outdir = sys.argv[6]
+    basedir = sys.argv[1] + "/"
+    coordir = sys.argv[2] + "/"
+    outdir = sys.argv[3] + "/"
+    t0,dt = map(lambda x: float(x),sys.argv[4:6])
+    nt = int(sys.argv[6])
+    downsample = bool(sys.argv[7]) if len(sys.argv) ==8 else 0
     os.system(f'mkdir -p {outdir}')
 
     # find how many procs used in specfem
@@ -245,7 +266,7 @@ def main():
 
     #basedir = '/home/l/liuqy/nqdu/scratch/axisem/SOLVER/ak135'
     for i in range(startid,endid+1):
-        args = (i,basedir,coordir,outdir,t1)
+        args = (i,basedir,coordir,outdir,t1,downsample)
         get_wavefield_proc(args)
         #get_trac_proc(args)
         #get_displ_proc(args)
