@@ -49,9 +49,10 @@ def get_wavefield_proc(args,intp_method='savgol'):
             fio.close()
     else: 
         # sanity check
-        if os.path.exists(outdir + "/wavefield_discontinuity_info.txt"):
-            # remove it 
-            os.remove(outdir + "/wavefield_discontinuity_info.txt")
+        if iproc == 0:
+            if os.path.exists(outdir + "/wavefield_discontinuity_info.txt"):
+                # remove it
+                os.remove(outdir + "/wavefield_discontinuity_info.txt")
 
 
     # create datafile for displ/accel
