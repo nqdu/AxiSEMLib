@@ -17,7 +17,7 @@ def get_wavefield_proc(args,intp_method='savgol'):
         print("Error: intp_method should be 'savgol' or 'linear'")
         return -1
 
-    iproc,basedir,coordir,outdir,tvec,downsample_to_T0 = args
+    iproc,basedir,coordir,outdir,tvec,downsample = args
     datadir = coordir
     file_trac = datadir + "proc%06d_wavefield_discontinuity_faces"%iproc
     file_disp = datadir + "proc%06d_wavefield_discontinuity_points"%iproc
@@ -32,8 +32,8 @@ def get_wavefield_proc(args,intp_method='savgol'):
     t0 = np.arange(db.nt) * db.dtsamp + db.t0
     t1 = tvec.copy()
     nt1 = len(t1)
-    if downsample_to_T0:
-        dt_dsmp = db.dominant_T0 / 2. # Nyquist freq = 1/T0
+    if downsample:
+        dt_dsmp = min(db.dominant_T0 / 2 / 5., 0.5) # 1/5 of Nyquist freq = 1/(2T0) / 5
         nt1 = int((t1[-1] - t1[0]) / dt_dsmp) + 1
 
         # slightly lengthen t1 to [t1[0] - dt_dsmp, t1[-1] + dt_dsmp]
