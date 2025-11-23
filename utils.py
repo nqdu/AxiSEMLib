@@ -6,15 +6,17 @@ def rotation_matrix(colat,lon):
     """
     get rotation matrix, Tarje 2007 (2.14), from (xyz) to (tpr): v^{sph} = R.T @ v^{cart}
 
-    Parameters: 
-    ========================
+    Parameters 
+    -----------
+
     colat: float 
         co-lattitude, in rad
-    lon : float
+    lon: float
         longitude, in rad
 
-    Returns:
-    =======================
+    Returns
+    -----------
+
     R: np.ndarray
         3x3 rotation matrix
     """
@@ -33,13 +35,17 @@ def rotate_tensor2(eps,R):
     """
     eps1_{pq} = R_{pi} eps_{ij} R_{qj}
 
+
+    Parameters
+    -------------------
+
     eps: np.ndarray
         symmetric 3x3 tensor, in voigt form
     R: np.ndarray
         3x3 rotation matrix
     
-    Returns:
-    ===================
+    Returns
+    -------------------
     eps1: np.ndarray
         eps1_{pq} = R_{pi} eps_{ij} R_{qj}
     """
