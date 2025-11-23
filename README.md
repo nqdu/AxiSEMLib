@@ -96,4 +96,5 @@ Set the variables in `submit_transpose.sh`, then:
 bash submit_transpose.sh 
 ```
 
-## Try examples in `EXAMPLES/` !
+## Try examples in `EXAMPLES/`
+
