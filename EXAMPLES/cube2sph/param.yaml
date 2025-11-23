@@ -1,0 +1,23 @@
+# parameter setting for generating injection field
+# working directory 
+AXISEM_DIR: ../axisem/SOLVER/ak135 
+SPECFEM_DB: ~/SPECFEM/DATABASES_MPI  # ${SPECFEM_DIR}/DATABASES_MPI
+SPECFEM_DATA: ~/SPECFEM/DATA  # ${SPECFEM_DIR}/DATA  #only needed when using equivalent forces coupling
+SPECFEM_SYSTEM: 'cube2sph'  # 'cart' or 'cube2sph'
+OUTPUT_DIR: './OUTPUT_DIR'
+
+# interpolation method
+intp_method: savgol  # interpolation method: linear, savgol
+DOWN_SAMPLING: True  # if true, down sample to  dominating period of axisem mesh T0/2 
+
+# method to coupling
+coupling_method: 'wd'  # coupling method: wd (wavefield discontinuity), ef: (equivalent forces)
+UTM_ZONE: 10  # UTM zone for cartesian system, only needed when SYSTEM = 'cart'
+only_eq_force: False  # only compute equivalent forces
+
+# time window 
+t0: 124.3  # starting timem t0 = 0 is the earthquake origin time
+dt: 0.025  # time step
+nt: 1000  # number of time steps
+
+# 
