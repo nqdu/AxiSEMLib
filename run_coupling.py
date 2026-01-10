@@ -16,7 +16,7 @@ def _validate_config(config):
     # --- 1. Helper for Path Resolution ---
     def resolve_path(path_str):
         if not path_str: return None
-        return os.path.abspath(os.path.expanduser(path_str))
+        return os.path.abspath(os.path.expanduser(path_str)) + '/'
 
     # --- 2. Retrieve Key Settings ---
     coupling = config.get('coupling_method', '').lower()
@@ -39,8 +39,6 @@ def _validate_config(config):
     if coupling == 'ef':
         if not data_path or not os.path.exists(data_path):
             errors.append(f"[Critical] Coupling is 'ef', but SPECFEM_DATA not found: {data_raw}")
-    elif data_path and not os.path.exists(data_path):
-        warnings.append(f"SPECFEM_DATA path invalid ({data_raw}), but allowed for coupling '{coupling}'")
 
     # --- 4. System & UTM Zone Validation (NEW) ---
     valid_systems = ['cart','cube2sph']

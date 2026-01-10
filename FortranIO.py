@@ -58,13 +58,25 @@ class FortranIO:
         return arr
     
 
-    def write_record(self, arr:np.ndarray):
+    def write_record(self, *arrays):
+        """
+        Write multiple arrays in a single Fortran record.
+        Equivalent to Fortran's: write(IO) a, b, c, d
         
-        data = arr.tobytes()
-        nbytes = len(data)
-        self.fio.write(struct.pack('i', nbytes))
-        self.fio.write(data)
-        self.fio.write(struct.pack('i', nbytes))
+        :param arrays: Variable number of numpy arrays to write
+        """
+        # Calculate total size without concatenating
+        nbytes = sum(arr.nbytes for arr in arrays)
+        
+        # Write start marker
+        self.fio.write(struct.pack('I', nbytes))
+        
+        # Write each array directly without concatenation
+        for arr in arrays:
+            self.fio.write(arr.tobytes())
+        
+        # Write end marker
+        self.fio.write(struct.pack('I', nbytes))
     
     def close(self):
         self.fio.close()

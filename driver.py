@@ -27,13 +27,13 @@ def read_boundary_points(coordir:str,iproc:int):
 
     return xx,yy,zz,nnx,nny,nnz 
 
-def get_field_proc_cart(args,inp_method ='savgol'):
+def get_field_proc_cart(args,intp_method ='savgol'):
     from pyproj import Proj
     from utils import rotation_matrix,rotate_tensor2
 
     # snity check
-    if inp_method not in ['savgol','linear']:
-        print("Error: inp_method should be 'savgol' or 'linear'")
+    if intp_method not in ['savgol','linear']:
+        print("Error: intp_method should be 'savgol' or 'linear'")
         return -1
 
     # unpack input paramters
@@ -73,7 +73,7 @@ def get_field_proc_cart(args,inp_method ='savgol'):
     r = zz + 6371000
     stel = -6371000 + r
 
-    method = inp_method  # 'savgol' or 'linear'
+    method = intp_method  # 'savgol' or 'linear'
     if iproc == 0: print("synthetic traction/velocity ...")
     for ir in range(npts):
         #print(f"synthetic traction for point {ir+1} of {npts} in proc {iproc} ...")
@@ -141,7 +141,7 @@ def get_wavefield_sph(args,intp_method ='savgol'):
     -------------------
     args: tuple
         (iproc,basedir,coordir,outdir,tvec,downsample)
-    inp_method: str
+    intp_method: str
         interpolation method: 'savgol' or 'linear'
     """
     # sanity check
@@ -604,7 +604,7 @@ def coupling_cart_stacey(param:dict):
                 param['OUTPUT_DIR'],
                 t1,
                 param['UTM_ZONE'])
-        get_field_proc_cart(args,inp_method=param['intp_method'])
+        get_field_proc_cart(args,intp_method=param['intp_method'])
 
 def coupling_cube2sph(param:dict):
     """
@@ -642,4 +642,5 @@ def coupling_cube2sph(param:dict):
                 param['OUTPUT_DIR'],
                 t1,
                 param['DOWN_SAMPLING'])
-        get_wavefield_sph(args,inp_method=param['intp_method'])
+
+        get_wavefield_sph(args,intp_method=param['intp_method'])

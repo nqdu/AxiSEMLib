@@ -92,6 +92,9 @@ class AxiBasicDB:
 
         # data file dict
         self.iodict = {}
+
+        # field cache
+        self._field_cache:dict[tuple[str,int],np.ndarray] = {}
     
     def __copy__(self):
         """
@@ -165,8 +168,22 @@ class AxiBasicDB:
         import os 
         for stype in ['MZZ',"MXX_P_MYY","MXZ_MYZ","MXY_MXX_M_MYY","PZ","PX","PY"]:
             dirname = ncfile_dir + '/' + stype
-            if os.path.exists(dirname):
-                self.iodict[stype] = h5py.File(dirname + '/Data/axisem_fields.h5',"r")
+
+            # check if all memmap files exist
+            for field in ['disp_s','disp_z','disp_p']:
+                filepath = dirname + '/Data/' + field + '.bin'
+                if not os.path.exists(filepath):
+                    break
+
+                # check size of file
+                size_of_float32 = os.path.getsize(filepath) // 4
+                if size_of_float32 != self.nspec * self.ngll * self.ngll * self.nt:
+                    self._is_dof_file = True
+                    shape = (self.nglob,self.nt)
+                else:
+                    shape = (self.nspec,self.ngll,self.ngll,self.nt)
+                    self._is_dof_file = False
+                self.iodict[stype + '/' + field] = np.memmap(filepath,dtype=np.float32,mode='r',shape=shape,order='C')
 
         # check if iodit is empty
         if len(self.iodict) == 0 :
@@ -249,6 +266,52 @@ class AxiBasicDB:
         
         return id_elem,xi,eta
     
+    def _get_field_elem(self,stype:str,fieldkey:str,elemid:int) -> np.ndarray:
+        """
+        get field data for one element from file
+
+        Parameters
+        ============================================================
+        stype: str
+            source type
+        fieldkey: str
+            field key in the binary file
+        elemid: int
+            element id
+
+        Returns
+        ============================================================
+        field_data: np.ndarray
+            field data for the specified element
+        """
+
+        # check 
+        key = stype + '/' + fieldkey
+        if key not in self.iodict:
+            return np.zeros((self.ngll,self.ngll,self.nt),dtype='f4')
+
+        fio = self.iodict[key]
+        if self._is_dof_file:
+            # check if (elemid,fieldkey) is in cache
+            cache_key = (key, elemid)
+            if cache_key in self._field_cache:
+                field_data = self._field_cache[cache_key]
+            else:
+                # read dataset for dof file
+                idx = self.ibool[elemid,:,:]
+                var = np.zeros((self.ngll,self.ngll,self.nt),dtype='f4')
+                for i in range(self.ngll):
+                    for j in range(self.ngll):
+                        gll_id = idx[i,j]
+                        var[i,j,:] = fio[gll_id,:]
+                field_data = var
+                self._field_cache[cache_key] = field_data
+        else:
+            field_data = fio[elemid,...]
+
+        return field_data
+
+    
     def _get_displ(self,elemid,xi,eta,stype):
         """
         Get displacement for one station
@@ -276,15 +339,13 @@ class AxiBasicDB:
         us = np.zeros((nt)); up = us * 0; uz = us * 1.
         
         # dataset info
-        fio:h5py.File = self.iodict[stype]
-        ngll = fio['disp_s'].shape[1]
+        ngll = self.ngll
         utemp = np.zeros((3,ngll,ngll,nt),dtype=float)
 
         # read dataset
-        utemp[0,...] = fio['disp_s'][elemid,...]
-        utemp[2,...] = fio['disp_z'][elemid,...]
-        if 'disp_p' in fio.keys():
-            utemp[1,...] = fio['disp_p'][elemid,...]
+        utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
+        utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
+        utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
         utemp = np.transpose(utemp,(3,2,1,0))
 
         sgll = self.gll
@@ -323,8 +384,7 @@ class AxiBasicDB:
         """
         from sem_funcs import lagrange_interpol_2D_td,strain_td
         nt = self.nt
-        fio:h5py.File = self.iodict[stype]
-        ngll = fio['disp_s'].shape[1]
+        ngll = self.ngll
 
         # allocate space
         eps = np.zeros((6,nt))
@@ -334,10 +394,9 @@ class AxiBasicDB:
         
         # dataset
         # read dataset
-        utemp[0,...] = fio['disp_s'][elemid,...]
-        utemp[2,...] = fio['disp_z'][elemid,...]
-        if 'disp_p' in fio.keys():
-            utemp[1,...] = fio['disp_p'][elemid,...]
+        utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
+        utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
+        utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
         utemp = np.transpose(utemp,(3,2,1,0))
 
         # gll/glj array
@@ -395,17 +454,15 @@ class AxiBasicDB:
         from sem_funcs import lagrange_interpol_2D_td,strain_td,find_theta
         from utils import c_ijkl_ani
         nt = self.nt 
-        fio:h5py.File = self.iodict[stype]
-        ngll = fio['disp_s'].shape[1]
+        ngll = self.ngll
     
         # cache element
         utemp = np.zeros((3,ngll,ngll,nt),dtype=float)
         
         # dataset
-        utemp[0,...] = fio['disp_s'][elemid,...]
-        utemp[2,...] = fio['disp_z'][elemid,...]
-        if 'disp_p' in fio.keys():
-            utemp[1,...] = fio['disp_p'][elemid,...]
+        utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
+        utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
+        utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
         utemp = np.transpose(utemp,(3,2,1,0))
 
         # alloc arrays for elastic tensor
@@ -513,17 +570,15 @@ class AxiBasicDB:
         from sem_funcs import lagrange_interpol_2D_td,strain_td,find_theta
         from utils import c_ijkl_ani
         nt = self.nt 
-        fio:h5py.File = self.iodict[stype]
-        ngll = fio['disp_s'].shape[1]
+        ngll = self.ngll
     
         # cache element
         utemp = np.zeros((3,ngll,ngll,nt),dtype=float)
         
         # dataset
-        utemp[0,...] = fio['disp_s'][elemid,...]
-        utemp[2,...] = fio['disp_z'][elemid,...]
-        if 'disp_p' in fio.keys():
-            utemp[1,...] = fio['disp_p'][elemid,...]
+        utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
+        utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
+        utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
         utemp = np.transpose(utemp,(3,2,1,0))
 
         # construct an equivalent strain tensor
