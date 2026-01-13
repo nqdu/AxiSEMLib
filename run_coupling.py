@@ -112,12 +112,18 @@ def main():
     # sanity check
     if rank ==0 :
         _validate_config(param)
+    comm.Barrier()
 
     # create output dir
     if rank ==0 :
         outdir = param['OUTPUT_DIR']
         os.makedirs(outdir,exist_ok=True)
     comm.Barrier()
+
+    # make all path to absolute path
+    for key in ['AXISEM_DIR','SPECFEM_DB','SPECFEM_DATA','OUTPUT_DIR']:
+        if key in param:
+            param[key] = os.path.abspath(os.path.expanduser(param[key])) + '/'
 
     # create functions for each coupling method
     coupling_method = param['coupling_method'].lower()

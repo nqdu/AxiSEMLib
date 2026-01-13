@@ -6,8 +6,9 @@
 #SBATCH --mem=0
 
 # load your own libs
-module load fwi/gcc hdf5-mpi
+module load fwi/gcc
 
 # solver dir
-axisem_data_dir=.. # like /path/to/axisem/SOLVER/ak135
-mpirun -np 8 python ./transpose_fields.py $axisem_data_dir MZZ MXZ_MYZ MXY_MXX_M_MYY MXX_P_MYY
+axisem_list=.. # like /path/to/axisem/SOLVER/ak135.*
+size_gb_per_rank=2.0  # size in GB per rank for buffer
+mpirun -np 8 python ./transpose_fields.py 1 $size_gb_per_rank $axisem_list
