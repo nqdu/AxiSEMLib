@@ -60,10 +60,6 @@ def _validate_config(config):
                     errors.append(f"UTM_ZONE must be between 1 and 60. Got: {utm_val}")
             except ValueError:
                 errors.append(f"UTM_ZONE must be an integer. Got: {utm_raw}")
-
-    # --- 5. Other Parameters ---
-    if config.get('intp_method') not in ['linear', 'savgol']:
-        errors.append(f"Invalid intp_method: {config.get('intp_method')}")
     
     if config.get('coupling_method') not in ['wd', 'ef']:
         errors.append(f"Invalid coupling_method: {config.get('coupling_method')}")

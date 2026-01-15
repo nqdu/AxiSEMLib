@@ -295,7 +295,7 @@ class AxiBasicDB:
             # check if (elemid,fieldkey) is in cache
             cache_key = (key, elemid)
             if cache_key in self._field_cache:
-                field_data = self._field_cache[cache_key]
+                field_data = self._field_cache[cache_key].copy()
             else:
                 # read dataset for dof file
                 idx = self.ibool[elemid,:,:]
@@ -305,9 +305,9 @@ class AxiBasicDB:
                         gll_id = idx[i,j]
                         var[i,j,:] = fio[gll_id,:]
                 field_data = var
-                self._field_cache[cache_key] = field_data
+                self._field_cache[cache_key] = field_data.copy()
         else:
-            field_data = fio[elemid,...]
+            field_data = fio[elemid,...].copy()
 
         return field_data
 

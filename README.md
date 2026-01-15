@@ -169,7 +169,6 @@ SPECFEM_SYSTEM: 'cube2sph'             # Options: 'cart' or 'cube2sph'
 OUTPUT_DIR: './OUTPUT_DIR'
 
 # Signal Processing
-intp_method: savgol                    # Interpolation method: 'linear' or 'savgol'
 DOWN_SAMPLING: True                    # If true, down-samples to AxiSEM mesh T0/2 
 
 # Coupling Methods

@@ -103,11 +103,88 @@ def _taper_hann_edges(f,taper_fac=0.05):
 
     return f_tapered
 
+def resample_axisem(t_old, y_old, t_new, deriv_order=0,f_dom=None):
+    """
+    Resamples solver data for hybrid simulation, handling filtering and derivatives.
+    
+    Parameters
+    ----------
+    t_old       : array (N,)
+        Original time vector (e.g., dt=0.018).
+    y_old       : array (N,)
+        Original solver output (displacement/state).
+    t_new : array
+        New time vector.
+    f_dom       : float
+        Dominant frequency of the physical signal (Hz).
+    deriv_order : int, optional
+        Order of derivative to return (0=pos, 1=vel, 2=accel). Default is 0.
+
+    Returns
+    -------
+    y_new : array
+        Interpolated (and differentiated) signal at t_new.
+    """
+
+    from scipy.interpolate import CubicSpline
+    from scipy.signal import butter, filtfilt
+    
+    # --- 1. Setup New Grid ---
+    dt_new = t_new[1] - t_new[0]
+    
+    # Calculate Limits
+    fs_old = 1.0 / np.mean(np.diff(t_old)) # Original Sampling Rate
+    nyquist_new = 1.0 / (2 * dt_new)       # New Nyquist Limit (6.25 Hz for dt=0.08)
+
+    # check if dt_new < dt_old, we don't filter in that case
+    filter_needed = True
+    if dt_new < (1.0 / fs_old):
+        filter_needed = False
+        
+    # --- 2. Feasibility Check ---
+    if f_dom is None:
+        f_dom = nyquist_new
+    if f_dom > nyquist_new:
+        raise ValueError(
+            f"CRITICAL ERROR: Dominant frequency ({f_dom} Hz) exceeds the new "
+            f"Nyquist limit ({nyquist_new} Hz). You cannot use dt={dt_new}. "
+            f"Maximum valid dt is {1/(2*f_dom):.4f}s."
+        )
+
+    # --- 3. Smart Filter Design ---
+    # Goal: Keep f_dom and its shape (harmonics), but kill anything that aliases.
+    # We try to keep up to the 3rd harmonic (3 * f_dom) to preserve wave shape,
+    # but we MUST cut off before the new Nyquist.
+    desired_cutoff = 3.0 * f_dom
+    safe_limit = 0.9 * nyquist_new  # 90% of Nyquist for safety margin
+    final_cutoff = min(desired_cutoff, safe_limit)
+    
+    # Apply Zero-Phase Filter (filtfilt prevents phase lag) if needed
+    if filter_needed:
+        Wn = final_cutoff / (0.5 * fs_old)
+        b, a = butter(N=4, Wn=Wn, btype='low')
+        y_filtered = filtfilt(b, a, y_old)
+    else:
+        y_filtered = y_old.copy()
+    
+    # --- 4. Spline Interpolation & Differentiation ---
+    # We use CubicSpline because it guarantees C2 continuity (smooth accel).
+    # PCHIP is safer for monotonicity, but CubicSpline is better for 
+    # preserving energy in oscillating systems.
+    cs = CubicSpline(t_old, y_filtered, bc_type='natural')
+    
+    # --- 5. Evaluate ---
+    y0_out = cs(t_new)
+    y1_out = None 
+    if deriv_order > 0:
+        y1_out = cs(t_new, nu=deriv_order)
+        
+    return y0_out,y1_out
 
 def prefilt_interp(
     t, u, t_new,
     method='savgol',     # 'savgol' or 'linear'
-    fmax=0.25,           # Hz: desired max passband (e.g., solver's reliable max freq). None = auto.
+    fmax=None,          # Hz: desired max passband (e.g., solver's reliable max freq). None = auto.
     sg_alpha=0.6,        # Savitzky–Golay window ~ fraction of a cycle at fmax
     sg_poly=5,           # Savitzky–Golay poly order (>= 2)
     deriv=0              # 0, 1, or 2: derivative order to return

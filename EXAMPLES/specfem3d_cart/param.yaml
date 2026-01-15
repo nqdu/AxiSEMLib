@@ -6,8 +6,7 @@ SPECFEM_DATA: ~/SPECFEM/DATA  # ${SPECFEM_DIR}/DATA  #only needed when using equ
 SPECFEM_SYSTEM: 'cart'  # 'cart' or 'cube2sph'
 OUTPUT_DIR: './OUTPUT_DIR'
 
-# interpolation method
-intp_method: savgol  # interpolation method: linear, savgol
+# down sampling
 DOWN_SAMPLING: False  # if true, down sample to  dominating period of axisem mesh T0/2 
 
 # method to coupling

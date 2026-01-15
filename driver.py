@@ -3,7 +3,7 @@ import numpy as np
 import os  
 from mpi4py import MPI
 from utils import cart2sph,allocate_task
-from utils import prefilt_interp
+from utils import resample_axisem
 from FortranIO import FortranIO  
 from jacobian import compute_jacobian_surface
 
@@ -27,14 +27,9 @@ def read_boundary_points(coordir:str,iproc:int):
 
     return xx,yy,zz,nnx,nny,nnz 
 
-def get_field_proc_cart(args,intp_method ='savgol'):
+def get_field_proc_cart(args):
     from pyproj import Proj
     from utils import rotation_matrix,rotate_tensor2
-
-    # snity check
-    if intp_method not in ['savgol','linear']:
-        print("Error: intp_method should be 'savgol' or 'linear'")
-        return -1
 
     # unpack input paramters
     iproc,basedir,coordir,outdir,tvec,UTM_ZONE = args
@@ -73,7 +68,7 @@ def get_field_proc_cart(args,intp_method ='savgol'):
     r = zz + 6371000
     stel = -6371000 + r
 
-    method = intp_method  # 'savgol' or 'linear'
+    fmax = 1.0 / db.dominant_T0
     if iproc == 0: print("synthetic traction/velocity ...")
     for ir in range(npts):
         #print(f"synthetic traction for point {ir+1} of {npts} in proc {iproc} ...")
@@ -94,18 +89,15 @@ def get_field_proc_cart(args,intp_method ='savgol'):
         ux,uy,uz = db.syn_seismo(stla[ir],stlo[ir],stel[ir],'enz',basedir + '/CMTSOLUTION')
 
         # get velocity
-        _,veloc_axi[:,ir,0] = prefilt_interp(t0,ux,t1,
-                                            method=method,
-                                            fmax=1./db.dominant_T0,
-                                            deriv=1)
-        _,veloc_axi[:,ir,1] = prefilt_interp(t0,uy,t1,
-                                            method=method,
-                                            fmax=1./db.dominant_T0,
-                                            deriv=1)
-        _,veloc_axi[:,ir,2] = prefilt_interp(t0,uz,t1,
-                                            method=method,
-                                            fmax=1./db.dominant_T0,
-                                            deriv=1)
+        _,veloc_axi[:,ir,0] = resample_axisem(t0,ux,t1,
+                                            deriv_order=1,
+                                            f_dom=fmax)
+        _,veloc_axi[:,ir,1] = resample_axisem(t0,uy,t1,
+                                            deriv_order=1,
+                                            f_dom=fmax)
+        _,veloc_axi[:,ir,2] = resample_axisem(t0,uz,t1,
+                                            deriv_order=1,
+                                            f_dom=fmax)
                                              
 
         # traction
@@ -114,18 +106,15 @@ def get_field_proc_cart(args,intp_method ='savgol'):
         Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz 
         Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz 
 
-        trac_axi[:,ir,0],_ = prefilt_interp(t0,Tx,t1,
-                                        method=method,
-                                        fmax=1./db.dominant_T0,
-                                        deriv=0)
-        trac_axi[:,ir,1],_ = prefilt_interp(t0,Ty,t1,
-                                        method=method,
-                                        fmax=1./db.dominant_T0,
-                                        deriv=0)
-        trac_axi[:,ir,2],_ = prefilt_interp(t0,Tz,t1,
-                                        method=method,
-                                        fmax=1./db.dominant_T0,
-                                        deriv=0)    
+        trac_axi[:,ir,0],_ = resample_axisem(t0,Tx,t1,
+                                        deriv_order=0,
+                                        f_dom=fmax)
+        trac_axi[:,ir,1],_ = resample_axisem(t0,Ty,t1,
+                                        deriv_order=0,
+                                        f_dom=fmax)
+        trac_axi[:,ir,2],_ = resample_axisem(t0,Tz,t1,
+                                        deriv_order=0,
+                                        f_dom=fmax)
 
     # write file
     for i in range(nt1):
@@ -133,7 +122,7 @@ def get_field_proc_cart(args,intp_method ='savgol'):
         
     f.close()
 
-def get_wavefield_sph(args,intp_method ='savgol'):
+def get_wavefield_sph(args):
     """
     get wavefield (displ/accel/traction) on the injection boundaries in spherical system
 
@@ -141,13 +130,7 @@ def get_wavefield_sph(args,intp_method ='savgol'):
     -------------------
     args: tuple
         (iproc,basedir,coordir,outdir,tvec,downsample)
-    intp_method: str
-        interpolation method: 'savgol' or 'linear'
     """
-    # sanity check
-    if intp_method not in ['savgol','linear']:
-        print("Error: intp_method should be 'savgol' or 'linear'")
-        return -1
 
     iproc,basedir,coordir,outdir,tvec,downsample = args
     datadir = coordir
@@ -186,6 +169,8 @@ def get_wavefield_sph(args,intp_method ='savgol'):
                 # remove it
                 os.remove(outdir + "/wavefield_discontinuity_info.txt")
 
+    # get fmax 
+    fmax = 1.0 / db.dominant_T0
 
     # create datafile for displ/accel
     if os.path.getsize(file_disp) != 0:
@@ -199,26 +184,21 @@ def get_wavefield_sph(args,intp_method ='savgol'):
     accel = np.zeros((nt1,npts,3),dtype='f4')
 
     # compute displ/accel on the injection boundaries
-    method = intp_method  # 'savgol' or 'linear'
     print(f"synthetic displ/accel for {file_disp} ...")
     for ir in range(npts):
         #print(f"synthetic displ/accel for point {ir+1} in proc {iproc} ...")
         ux1,uy1,uz1 = db.syn_seismo(stla[ir],stlo[ir],stel[ir],'xyz',basedir + '/CMTSOLUTION')
 
         # interpolate to t1 
-        
-        displ[:,ir,0],accel[:,ir,0] = prefilt_interp(t0,ux1,t1,
-                                                     method=method,
-                                                     fmax=1./db.dominant_T0,
-                                                     deriv=2)
-        displ[:,ir,1],accel[:,ir,1] = prefilt_interp(t0,uy1,t1,
-                                                     method=method,
-                                                     fmax=1./db.dominant_T0,
-                                                     deriv=2)
-        displ[:,ir,2],accel[:,ir,2] = prefilt_interp(t0,uz1,t1,
-                                                     method=method,
-                                                     fmax=1./db.dominant_T0,
-                                                     deriv=2)
+        displ[:,ir,0],accel[:,ir,0] = resample_axisem(t0,ux1,t1,
+                                                     deriv_order=2,
+                                                     f_dom=fmax)
+        displ[:,ir,1],accel[:,ir,1] = resample_axisem(t0,uy1,t1,
+                                                     deriv_order=2,
+                                                     f_dom=fmax)
+        displ[:,ir,2],accel[:,ir,2] = resample_axisem(t0,uz1,t1,
+                                                     deriv_order=2,
+                                                     f_dom=fmax)
 
     # compute traction on the injection boundaries
     if os.path.getsize(file_trac) != 0:
@@ -241,18 +221,15 @@ def get_wavefield_sph(args,intp_method ='savgol'):
         Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz 
         Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz 
 
-        tract[:,ir,0],_ = prefilt_interp(t0,Tx,t1,
-                                        method=method,
-                                        fmax=1./db.dominant_T0,
-                                        deriv=0)
-        tract[:,ir,1],_ = prefilt_interp(t0,Ty,t1,
-                                        method=method,
-                                        fmax=1./db.dominant_T0,
-                                        deriv=0)
-        tract[:,ir,2],_ = prefilt_interp(t0,Tz,t1,
-                                        method=method,
-                                        fmax=1./db.dominant_T0,
-                                        deriv=0)
+        tract[:,ir,0],_ = resample_axisem(t0,Tx,t1,
+                                        deriv_order=0,
+                                        f_dom=fmax)
+        tract[:,ir,1],_ = resample_axisem(t0,Ty,t1,
+                                        deriv_order=0,
+                                        f_dom=fmax)
+        tract[:,ir,2],_ = resample_axisem(t0,Tz,t1,
+                                        deriv_order=0,
+                                        f_dom=fmax)
 
     # write final binary for specfem_injection
     displ = displ.astype('f4')
@@ -414,7 +391,6 @@ def equivalent_force_cube2sph(param:dict):
     t0 = np.arange(db.nt) * db.dtsamp + db.t0
     t1 = np.arange(param['nt']) * param['dt'] + param['t0']
     nt1 = len(t1)
-    method = param['intp_method']  # 'savgol' or 'linear'
 
     # force components 
     stf = np.zeros((nfaces_loc,NGLL,NGLL,3,nt1),dtype=float)
@@ -430,6 +406,7 @@ def equivalent_force_cube2sph(param:dict):
         offset = offset * 2 # for equivalent force only, no moment tensor
 
     # compute equivalent force on each face
+    fmax = 1.0 / db.dominant_T0
     for iface in range(startid,endid+1):
         #print(f"compute equivalent force for face {iface+1} of {nfaces} in proc {rank} ...")
         for i in range(NGLL):
@@ -448,18 +425,15 @@ def equivalent_force_cube2sph(param:dict):
                 Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz 
                 Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz 
 
-                Tx,_ = prefilt_interp(t0,Tx,t1,
-                                      method=method,
-                                      fmax=1./db.dominant_T0,
-                                      deriv=0)
-                Ty,_ = prefilt_interp(t0,Ty,t1,
-                                      method=method,
-                                      fmax=1./db.dominant_T0,
-                                      deriv=0)
-                Tz,_ = prefilt_interp(t0,Tz,t1,
-                                      method=method,
-                                      fmax=1./db.dominant_T0,
-                                      deriv=0)
+                Tx,_ = resample_axisem(t0,Tx,t1,
+                                       deriv_order=0,
+                                      fmax=fmax)
+                Ty,_ = resample_axisem(t0,Ty,t1,
+                                       deriv_order=0,
+                                      fmax=fmax)
+                Tz,_ = resample_axisem(t0,Tz,t1,
+                                       deriv_order=0,
+                                      fmax=fmax)
                 stf[iface,i,j,0,:] = - Tx 
                 stf[iface,i,j,1,:] = - Ty
                 stf[iface,i,j,2,:] = - Tz
@@ -474,10 +448,9 @@ def equivalent_force_cube2sph(param:dict):
 
                 # save mt 
                 for k in range(6):
-                    out,_ = prefilt_interp(t0,mt_xyz[k,:],t1,
-                                          method=method,
-                                          fmax=1./db.dominant_T0,
-                                          deriv=0)
+                    out,_ = resample_axisem(t0,mt_xyz[k,:],t1,
+                                           deriv_order=0,
+                                          fmax=fmax)
                     stf_mt[iface,i,j,k,:] = out 
 
     # now we change to stf_mt to equivalent force if required
@@ -604,7 +577,7 @@ def coupling_cart_stacey(param:dict):
                 param['OUTPUT_DIR'],
                 t1,
                 param['UTM_ZONE'])
-        get_field_proc_cart(args,intp_method=param['intp_method'])
+        get_field_proc_cart(args)
 
 def coupling_cube2sph(param:dict):
     """
@@ -643,4 +616,4 @@ def coupling_cube2sph(param:dict):
                 t1,
                 param['DOWN_SAMPLING'])
 
-        get_wavefield_sph(args,intp_method=param['intp_method'])
+        get_wavefield_sph(args)
