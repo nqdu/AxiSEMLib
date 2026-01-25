@@ -10,12 +10,6 @@ typedef py::array_t<int> imat;
 
 extern "C"{
 
-// base on nanqiao's surfdisp.hpp
-// That's the cpp warpper , packing the fortran code
-
-/**
- * computer the rf 
-**/
 void inside_element(double s, double z,const double *nodes, 
                    int element_type, double tolerance, bool *in_element, 
                    double *xi, double *eta); 

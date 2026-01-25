@@ -36,7 +36,7 @@ class AxiBasicDB:
         self.mag = fio.attrs['scalar source magnitude'][0] * 1.
 
         # rotation matrix
-        self.rot_mat = rotation_matrix(evcola,evlo)
+        self.rot_s = rotation_matrix(evcola,evlo)
 
         # read mesh 
         self.mesh_s = fio['Mesh/mesh_S'][:]
@@ -92,6 +92,9 @@ class AxiBasicDB:
 
         # data file dict
         self.iodict = {}
+
+        # field cache
+        self._field_cache:dict[tuple[str,int],np.ndarray] = {}
     
     def __copy__(self):
         """
@@ -118,14 +121,14 @@ class AxiBasicDB:
         db.mag = self.mag
 
         # rotation matrix
-        db.rot_mat = self.rot_mat * 1.
+        db.rot_mat = self.rot_s * 1.
 
         # read mesh 
-        db.mesh_s = self.mesh_s
-        db.mesh_z = self.mesh_z
+        db.mesh_s = self.mesh_s.copy()
+        db.mesh_z = self.mesh_z.copy()
 
         # create kdtree
-        db.kdtree = self.kdtree
+        db.kdtree = self.kdtree.copy()
 
         # elemtype
         db.eltype = self.eltype
@@ -165,8 +168,22 @@ class AxiBasicDB:
         import os 
         for stype in ['MZZ',"MXX_P_MYY","MXZ_MYZ","MXY_MXX_M_MYY","PZ","PX","PY"]:
             dirname = ncfile_dir + '/' + stype
-            if os.path.exists(dirname):
-                self.iodict[stype] = h5py.File(dirname + '/Data/axisem_fields.h5',"r")
+
+            # check if all memmap files exist
+            for field in ['disp_s','disp_z','disp_p']:
+                filepath = dirname + '/Data/' + field + '.bin'
+                if not os.path.exists(filepath):
+                    break
+
+                # check size of file
+                size_of_float32 = os.path.getsize(filepath) // 4
+                if size_of_float32 != self.nspec * self.ngll * self.ngll * self.nt:
+                    self._is_dof_file = True
+                    shape = (self.nglob,self.nt)
+                else:
+                    shape = (self.nspec,self.ngll,self.ngll,self.nt)
+                    self._is_dof_file = False
+                self.iodict[stype + '/' + field] = np.memmap(filepath,dtype=np.float32,mode='r',shape=shape,order='C')
 
         # check if iodit is empty
         if len(self.iodict) == 0 :
@@ -183,6 +200,9 @@ class AxiBasicDB:
     def set_source(self,evla:float,evlo:float):
         """
         update source info in the database
+
+        Parameters
+        ============================================================
         evla: float
             latitude of station, in deg
         evlo: float
@@ -190,7 +210,7 @@ class AxiBasicDB:
         """
         self.evla = evla
         self.evlo = evlo 
-        self.rot_mat = rotation_matrix(np.pi/2-np.deg2rad(evla),np.deg2rad(evlo))
+        self.rot_s = rotation_matrix(np.pi/2-np.deg2rad(evla),np.deg2rad(evlo))
         pass
 
     def read_cmt(self,cmtfile:str):
@@ -201,6 +221,27 @@ class AxiBasicDB:
         return mzz,mxx,myy,mxz,myz,mxy
     
     def _locate_elem(self,s,z,is_el_point = True):
+        """
+        locate element for one station
+
+        Parameters
+        ============================================================
+        s: float
+            s coordinate
+        z: float
+            z coordinate
+        is_el_point: bool, optional
+            whether the point is an element point (default is True)
+
+        Returns
+        ============================================================
+        id_elem: int or None
+            element id if found, otherwise None
+        xi: float
+            local coordinate xi
+        eta: float
+            local coordinate eta
+        """
         from sem_funcs import inside_element
         id_elem = None 
 
@@ -225,9 +266,58 @@ class AxiBasicDB:
         
         return id_elem,xi,eta
     
+    def _get_field_elem(self,stype:str,fieldkey:str,elemid:int) -> np.ndarray:
+        """
+        get field data for one element from file
+
+        Parameters
+        ============================================================
+        stype: str
+            source type
+        fieldkey: str
+            field key in the binary file
+        elemid: int
+            element id
+
+        Returns
+        ============================================================
+        field_data: np.ndarray
+            field data for the specified element
+        """
+
+        # check 
+        key = stype + '/' + fieldkey
+        if key not in self.iodict:
+            return np.zeros((self.ngll,self.ngll,self.nt),dtype='f4')
+
+        fio = self.iodict[key]
+        if self._is_dof_file:
+            # check if (elemid,fieldkey) is in cache
+            cache_key = (key, elemid)
+            if cache_key in self._field_cache:
+                field_data = self._field_cache[cache_key].copy()
+            else:
+                # read dataset for dof file
+                idx = self.ibool[elemid,:,:]
+                var = np.zeros((self.ngll,self.ngll,self.nt),dtype='f4')
+                for i in range(self.ngll):
+                    for j in range(self.ngll):
+                        gll_id = idx[i,j]
+                        var[i,j,:] = fio[gll_id,:]
+                field_data = var
+                self._field_cache[cache_key] = field_data.copy()
+        else:
+            field_data = fio[elemid,...].copy()
+
+        return field_data
+
+    
     def _get_displ(self,elemid,xi,eta,stype):
         """
         Get displacement for one station
+
+        Parameters
+        ============================================================
 
         stel: float 
             elevation, in m
@@ -236,8 +326,8 @@ class AxiBasicDB:
         ncfile: str
             ncfile which the displ is stored in 
 
-        Returns:
-        
+        Returns
+        -----------------------------------------------------------
         us,up,uz: np.ndarray
             s,p,z components 
             
@@ -249,15 +339,13 @@ class AxiBasicDB:
         us = np.zeros((nt)); up = us * 0; uz = us * 1.
         
         # dataset info
-        fio:h5py.File = self.iodict[stype]
-        ngll = fio['disp_s'].shape[1]
+        ngll = self.ngll
         utemp = np.zeros((3,ngll,ngll,nt),dtype=float)
 
         # read dataset
-        utemp[0,...] = fio['disp_s'][elemid,...]
-        utemp[2,...] = fio['disp_z'][elemid,...]
-        if 'disp_p' in fio.keys():
-            utemp[1,...] = fio['disp_p'][elemid,...]
+        utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
+        utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
+        utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
         utemp = np.transpose(utemp,(3,2,1,0))
 
         sgll = self.gll
@@ -283,21 +371,20 @@ class AxiBasicDB:
         """
         get strain field at a given point, for a given source type
 
-        Parameters:
+        Parameters
         ===================================================
         elemid: current 
         xi/eta: local coordinates 
         stype: source type
 
-        Returns:
+        Returns
         ====================================================
         strain : np.ndarray
                 shape(6,nt), ess,epp,ezz,epz,esz,esp
         """
         from sem_funcs import lagrange_interpol_2D_td,strain_td
         nt = self.nt
-        fio:h5py.File = self.iodict[stype]
-        ngll = fio['disp_s'].shape[1]
+        ngll = self.ngll
 
         # allocate space
         eps = np.zeros((6,nt))
@@ -307,10 +394,9 @@ class AxiBasicDB:
         
         # dataset
         # read dataset
-        utemp[0,...] = fio['disp_s'][elemid,...]
-        utemp[2,...] = fio['disp_z'][elemid,...]
-        if 'disp_p' in fio.keys():
-            utemp[1,...] = fio['disp_p'][elemid,...]
+        utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
+        utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
+        utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
         utemp = np.transpose(utemp,(3,2,1,0))
 
         # gll/glj array
@@ -349,24 +435,34 @@ class AxiBasicDB:
         """
         get stress field for a given point from file
 
-        Returns:
+        Parameters
+        ===================================================
+        elemid: int
+            current element id
+        xi: float
+            local coordinate xi
+        eta: float
+            local coordinate eta
+        stype: str
+            source type
+
+        Returns
+        ===================================================
         stress : np.ndarray
                 shape(6,nt), ess,epp,ezz,epz,esz,esp
         """
         from sem_funcs import lagrange_interpol_2D_td,strain_td,find_theta
         from utils import c_ijkl_ani
         nt = self.nt 
-        fio:h5py.File = self.iodict[stype]
-        ngll = fio['disp_s'].shape[1]
+        ngll = self.ngll
     
         # cache element
         utemp = np.zeros((3,ngll,ngll,nt),dtype=float)
         
         # dataset
-        utemp[0,...] = fio['disp_s'][elemid,...]
-        utemp[2,...] = fio['disp_z'][elemid,...]
-        if 'disp_p' in fio.keys():
-            utemp[1,...] = fio['disp_p'][elemid,...]
+        utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
+        utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
+        utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
         utemp = np.transpose(utemp,(3,2,1,0))
 
         # alloc arrays for elastic tensor
@@ -447,6 +543,122 @@ class AxiBasicDB:
             sigma[j,:] = lagrange_interpol_2D_td(sgll,zgll,stress[:,:,:,j],xi,eta)
         
         return sigma
+    
+    def _get_eq_moment(self,elemid,xi,eta,norm_spz,stype):
+        """
+        get equivalent moment at a given point from file
+
+        Parameters
+        ===================================================
+        elemid: int
+            current element id
+        xi: float
+            local coordinate xi
+        eta: float
+            local coordinate eta
+        norm_spz: np.ndarray
+            normal vector at the station, shape(3,)
+        stype: str
+            source type
+
+        Returns
+        ===================================================
+        sigma : np.ndarray
+                shape(6,nt), ess,epp,ezz,epz,esz,esp
+        """
+        # get stress
+        from sem_funcs import lagrange_interpol_2D_td,strain_td,find_theta
+        from utils import c_ijkl_ani
+        nt = self.nt 
+        ngll = self.ngll
+    
+        # cache element
+        utemp = np.zeros((3,ngll,ngll,nt),dtype=float)
+        
+        # dataset
+        utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
+        utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
+        utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
+        utemp = np.transpose(utemp,(3,2,1,0))
+
+        # construct an equivalent strain tensor
+        e = np.zeros((nt,ngll,ngll,6),dtype=float,order='F')
+        e[...,0] = norm_spz[0] * utemp[...,0]
+        e[...,1] = norm_spz[1] * utemp[...,1]
+        e[...,2] = norm_spz[2] * utemp[...,2]
+        e[...,3] = norm_spz[1] * utemp[...,2] + norm_spz[2] * utemp[...,1]
+        e[...,4] = norm_spz[0] * utemp[...,2] + norm_spz[2] * utemp[...,0]
+        e[...,5] = norm_spz[0] * utemp[...,1] + norm_spz[1] * utemp[...,0]
+
+        # alloc arrays for elastic tensor
+        xmu = np.zeros((ngll,ngll),dtype=float)
+        xlam = np.zeros((ngll,ngll),dtype=float)
+        xxi = xlam * 1. 
+        xphi = xlam * 1. 
+        xeta = xlam * 1.
+        xmu[:,:] = self.xmu[elemid,:,:]; xlam[:,:] = self.xlamda[elemid,:,:]
+        xxi[:,:] = self.xxi[elemid,:,:]; xphi[:,:] = self.xphi[elemid,:,:]
+        xeta[:,:] = self.xeta[elemid,:,:]
+        xmu = np.transpose(xmu); xlam = np.transpose(xlam)
+        xxi = np.transpose(xxi); xphi = np.transpose(xphi)
+        xeta = np.transpose(xeta)
+
+        # gll/glj array
+        sgll = self.gll
+        zgll = self.gll
+        is_axi = self.axis[elemid] == 1
+        if is_axi:
+            sgll = self.glj
+
+        # control points
+        skel = np.zeros((self.nctrl,2))
+        ctrl_id = self.skelid[elemid,:]
+        eltype = self.eltype[elemid]
+        skel[:,0] = self.mesh_s[ctrl_id]
+        skel[:,1] = self.mesh_z[ctrl_id]
+
+        if self.axis[elemid]:
+            G = self.G2 
+            GT = self.G1T 
+        else:
+            G = self.G2 
+            GT = self.G2T 
+
+        # find theta
+        theta = find_theta(sgll,zgll,skel,eltype)
+
+        # get elastic tensor c21
+        c11 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 1, 1)
+        c12 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 2, 2)
+        c13 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 3)
+        c15 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 1)
+        c22 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 2, 2)
+        c23 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 3)
+        c25 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 1)
+        c33 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 3)
+        c35 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 1)
+        c44 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 2, 3)
+        c46 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 1, 2)
+        c55 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 1, 3, 1)
+        c66 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 2, 1, 2)
+        c14 = 0.; c26 = 0.; c36 = 0.; c24 = 0.
+        c16 = 0.; c45 = 0.; c56 = 0.; c34 = 0.
+
+        # Compute stress components explicitly using Voigt notation
+        stress = e * 0.
+        stress[..., 0] = c11 * e[..., 0] + c16 * e[..., 5] + c12 * e[..., 1] + c15 * e[..., 4] + c14 * e[..., 3] + c13 * e[..., 2]  # sxx → s[..., 0]
+        stress[..., 1] = c12 * e[..., 0] + c26 * e[..., 5] + c22 * e[..., 1] + c25 * e[..., 4] + c24 * e[..., 3] + c23 * e[..., 2]  # syy → s[..., 1]
+        stress[..., 2] = c13 * e[..., 0] + c36 * e[..., 5] + c23 * e[..., 1] + c35 * e[..., 4] + c34 * e[..., 3] + c33 * e[..., 2]  # szz → s[..., 2]
+        stress[..., 3] = c14 * e[..., 0] + c46 * e[..., 5] + c24 * e[..., 1] + c45 * e[..., 4] + c44 * e[..., 3] + c34 * e[..., 2]  # syz → s[..., 3]
+        stress[..., 4] = c15 * e[..., 0] + c56 * e[..., 5] + c25 * e[..., 1] + c55 * e[..., 4] + c45 * e[..., 3] + c35 * e[..., 2]  # sxz → s[..., 4]
+        stress[..., 5] = c16 * e[..., 0] + c66 * e[..., 5] + c26 * e[..., 1] + c56 * e[..., 4] + c46 * e[..., 3] + c36 * e[..., 2]  # sxy → s[..., 5]
+
+        # interpolate 
+        # es shape(6,nt)
+        sigma = np.zeros((6,nt))
+        for j in range(6):
+            sigma[j,:] = lagrange_interpol_2D_td(sgll,zgll,stress[:,:,:,j],xi,eta)
+        return sigma
 
     def compute_tp_recv(self,stla,stlo):
         """
@@ -461,7 +673,7 @@ class AxiBasicDB:
         z = np.sin(stla * np.pi/ 180)
 
         # rotate xyz to source centered system
-        x1,y1,z1 = np.dot(self.rot_mat.T,np.array([x,y,z]))
+        x1,y1,z1 = np.dot(self.rot_s.T,np.array([x,y,z]))
 
         # to phi and theta
         r = np.sqrt(x1**2 + y1**2 + z1**2)
@@ -572,11 +784,11 @@ class AxiBasicDB:
         Rr = rotation_matrix(np.deg2rad(90-stla),np.deg2rad(stlo))
 
         if comp == 'enz':
-            Rr = Rr.T @ self.rot_mat @ R1
+            Rr = Rr.T @ self.rot_s @ R1
         elif comp == 'spz':
             Rr = np.eye(3)
         else:
-            Rr = self.rot_mat @ R1 
+            Rr = self.rot_s @ R1 
 
         u1 = Rr[0,0] * us + Rr[0,1] * up + Rr[0,2] * uz 
         u2 = Rr[1,0] * us + Rr[1,1] * up + Rr[1,2] * uz 
@@ -659,7 +871,7 @@ class AxiBasicDB:
         R1 = np.eye(3) # rotate from (s,phi,z) to (xs,ys,z)
         R1[0,:2] = [np.cos(phi),-np.sin(phi)]
         R1[1,:2] = [np.sin(phi),np.cos(phi)]
-        R = self.rot_mat @ R1
+        R = self.rot_s @ R1
         eps_xyz = rotate_tensor2(eps,R)
 
         return eps_xyz
@@ -732,7 +944,106 @@ class AxiBasicDB:
         R1 = np.eye(3) # rotate from (s,phi,z) to (xs,ys,z)
         R1[0,:2] = [np.cos(phi),-np.sin(phi)]
         R1[1,:2] = [np.sin(phi),np.cos(phi)]
-        R = self.rot_mat @ R1
+        R = self.rot_s @ R1
         sigma_xyz = rotate_tensor2(sigma,R)
 
         return sigma_xyz
+    
+    def syn_eq_moment(self,stla,stlo,stel,norm_xyz,cmtfile=None,forcevec=None):
+        """
+        compute equivalent moment at a given station
+
+        Parameters
+        ============================================================
+        stla: float
+            latitude of station, in deg
+        stlo: float
+            longitude of station, in deg
+        stel: float
+            elevation of station, in m
+        norm_xyz: np.ndarray
+            normal vector (along xyz) at the station, shape(3,)
+        cmtfile: str
+            cmt solution file
+        forcevec: tuple or list
+            force vector components (fx, fy, fz)
+        
+        Returns
+        ============================================================
+        m_eq: np.ndarray
+            equivalent moment at the station, shape(3,3,nt)
+        """
+        # read source type
+        assert((cmtfile is not None) or (forcevec is not None))
+        mzz,mxx,myy,mxz,myz,mxy = [0. for i in range(6)]
+        fx,fy,fz = [0.,0.,0.]
+        srctypes = []
+
+        if cmtfile is not None:
+            mzz,mxx,myy,mxz,myz,mxy = self.read_cmt(cmtfile)
+            srctypes = ['MZZ',"MXX_P_MYY","MXZ_MYZ","MXY_MXX_M_MYY"]
+        else:
+            fx,fy,fz = forcevec
+            srctypes = ["PZ","PX_PY"]
+
+        # alloc space for seismograms
+        nt = self.nt 
+        sigma = np.zeros((6,nt))
+
+        # compute rotated station phi,theta
+        theta,phi = self.compute_tp_recv(stla,stlo)
+        sr,zr = self.compute_local(theta,stel)
+
+        # rotation matrix from spz to xyz
+        R1 = np.eye(3) # rotate from (spz to xs,ys,zs)
+        R1[0,:2] = [np.cos(phi),-np.sin(phi)]
+        R1[1,:2] = [np.sin(phi),np.cos(phi)]
+        R = self.rot_s @ R1
+        norm_spz = R.T @ norm_xyz.reshape((3,1))
+        
+        # locate element
+        elemid,xi,eta = self._locate_elem(sr,zr)
+
+        # loop every source type
+        for stype in srctypes:
+            #print("synthetic strain tensor for  ... %s" %(stype))
+            # get basic waveform
+            eps0 = self._get_eq_moment(elemid,xi,eta,norm_spz,stype)
+
+            # parameters
+            a = 0.; b = 0.
+            if stype == 'MZZ':  # mono
+                a = mzz 
+                b = 0.
+            elif stype == "PZ":
+                a = fz 
+                b = 0.
+            elif stype == 'MXX_P_MYY': # mono
+                a = mxx + myy
+                b = 0            
+            
+            # interpolate
+            cosphi = np.cos(phi); sinphi = np.sin(phi)
+            cos2phi = np.cos(2 * phi); sin2phi = np.sin(2 * phi)
+            if stype  == 'MXZ_MYZ':
+                a = mxz * cosphi + myz * sinphi
+                b = myz * cosphi - mxz * sinphi
+            elif stype == "MXY_MXX_M_MYY":
+                a = (mxx - myy) * cos2phi + 2 * mxy * sin2phi 
+                b = -(mxx - myy) * sin2phi + 2 * mxy * cos2phi 
+            
+            elif stype == "PX_PY":
+                a = fx * cosphi + fy * sinphi 
+                b = -fx * sinphi + fy * cosphi
+
+            # normalize
+            eps0[0:3,:] *= a; eps0[4,:] *= a
+            eps0[3,:] *= b; eps0[5:,:] *= b
+            
+            # add contribution from each term
+            sigma += eps0
+
+        # rotate to xyz from spz
+        moment = rotate_tensor2(sigma,R)
+
+        return moment

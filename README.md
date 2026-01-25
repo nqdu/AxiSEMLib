@@ -1,45 +1,68 @@
+
 # AxiSEMLib
 
-**AxiSEMLib** is a python library that provides several extensions for the [AxiSEM](https://github.com/geodynamics/axisem):
+**AxiSEMLib** is a Python library designed to extend the capabilities of [AxiSEM](https://github.com/geodynamics/axisem). It facilitates high-precision seismic modeling,hybrid simulation integration, and efficient database management.
 
-* Synthesize accurate seismograms/strain/stress at any point of the earth.
-* Teleseismic injection interfaces between **AxiSEM**, [SPECFEM3D](https://github.com/SPECFEM/specfem3d) and [SPECFEM3D-injection](https://github.com/tianshi-liu/specfem3D-injection)
-* Reciprocity validation and [Instaseis](https://github.com/krischer/instaseis)-like Database. 
+## Key Features
 
-And there are several modifications in [AxiSEM](https://github.com/geodynamics/axisem)
-* Fix source location problem
-* Dump elastic parameters in discontinuous form.
+* **High-Precision Synthesis:** Generate accurate seismograms, strain, and stress tensors at any arbitrary point within the Earth.
+* **Teleseismic Injection:** Seamless interfaces for wavefield injection between **AxiSEM**, [SPECFEM3D](https://github.com/SPECFEM/specfem3d), and [SPECFEM3D-injection](https://github.com/tianshi-liu/specfem3D-injection).
+* **Reciprocity & Databases:** Tools for reciprocity validation and the creation of [Instaseis](https://github.com/krischer/instaseis)-style databases.
+* **Enhanced AxiSEM Core:** Includes specific modifications to the original AxiSEM code:
+    * Resolved source location inaccuracies.
+    * Support for dumping elastic parameters in discontinuous forms.
 
-Part of the code are adapted from [Instaseis](https://github.com/krischer/instaseis), so LGPL license is applied.
- 
+> **Note on Licensing:** Parts of this codebase are adapted from [Instaseis](https://github.com/krischer/instaseis); therefore, this library is distributed under the **LGPL license**.
 
-## Download required packages
-1. **Compilers:** C++/Fortran compilers which support c++14 (tested on `GCC >=7.5`, `ICC >=18.4.0`), `cmake >= 3.12`, and MPI libraries.
+---
 
-2. create a new environment with conda:
+## Installation
+
+### 1. System Requirements
+Before installing the Python package, ensure your system has the following:
+* **Compilers:** C++ and Fortran compilers supporting **C++14** (Tested on `GCC >=7.5` and `ICC >=18.4.0`).
+* **Build Tools:** `cmake >= 3.12`.
+* **Libraries:** MPI libraries (e.g., OpenMPI, MPICH).
+* **External Dependencies:** * [HDF5](https://support.hdfgroup.org/HDF5)
+    * [netcdf-fortran](https://docs.unidata.ucar.edu/netcdf-fortran/current/) (Serial version only).
+
+### 2. Environment Setup
+We recommend using a Conda environment to manage Python dependencies:
+
 ```bash
-conda create -n axisem_lib python=3.8 
+# Create and activate environment
+conda create -n axisem_lib python=3.12
 conda activate axisem_lib
-conda install numpy scipy numba pyproj tqdm
-pip install pybind11-global
-```
-3. Install several packages:
-* [parallel-hdf5](https://support.hdfgroup.org/HDF5/PHDF5/) using your installed MPI libraries. 
-* [netcdf-fortran](https://docs.unidata.ucar.edu/netcdf-fortran/current/), only serial version.
-* [mpi4py](https://mpi4py.readthedocs.io/en/stable/install.html): You can build it by using existing mpi libraries:
-```bash 
-MPICC=mpicc pip install mpi4py --no-binary mpi4py
-```
-* [h5py-mpi](https://docs.h5py.org/en/stable/mpi.html) using existing `parallel-hdf5` libraries:
-```bash
-CC="mpicc" HDF5_MPI="ON" HDF5_DIR=/path/to/parallel-hdf5 pip install --no-binary=h5py h5py
+
+# Install core dependencies
+pip install numpy scipy numba pyproj tqdm pyyaml pybind11-global
 ```
 
-4. build `AxiSEMLib` by using:
+### 3. Install external packages
+To ensure the library functions correctly with parallel I/O and scientific data formats, install the following dependencies:
+
+* **[HDF5](https://support.hdfgroup.org/HDF5):** Required for high-performance data management.
+* **[netcdf-fortran](https://docs.unidata.ucar.edu/netcdf-fortran/current/):** Required for AxiSEM compatibility (**Note:** Use the serial version only).
+* **[mpi4py](https://mpi4py.readthedocs.io/en/stable/install.html):** Build this using your existing system MPI libraries to ensure consistent parallel execution:
+    ```bash 
+    MPICC=mpicc pip install mpi4py --no-binary mpi4py
+    ```
+* **[h5py](https://docs.h5py.org/en/stable/mpi.html):** Build this from source linked against your specific `HDF5` installation:
+    ```bash
+    HDF5_DIR=/path/to/your/hdf5 pip install --no-binary=h5py h5py
+    ```
+
+### 4. Build and Install AxiSEMLib
+Finally, compile and install the library using `cmake`. Ensure that your environment is activated so that the correct Python path is detected.
+
 ```bash
-mkdir -p build; cd build;
-cmake .. -DCXX=g++ -DFC=gfortran  -DPYTHON_EXECUTABLE=`which python`
-make -j4; make install 
+# Create build directory and compile
+mkdir -p build && cd build
+cmake .. -DCXX=g++ -DFC=gfortran -DPYTHON_EXECUTABLE=$(which python)
+
+# Build using 4 cores and install
+make -j4
+make install
 ```
 
 ## Prepare AxiSEM Mesh
@@ -53,15 +76,44 @@ EXT_MODEL ak135.smooth.bm
 
 - Run mesh generation `./submit.csh` and `./movemesh.csh mesh_name`. Then the mesh files will be moved to `SOLVER/MESHES` as the `mesh_name` you set.
 
-## Prepare AxiSEM Solver files
-There are two files you should edit: `inparam_basic` and `inparam_advanced`.
+## Prepare AxiSEM Mesh
 
-In `param_basic` you should set `SEISMOGRAM_LENGTH` as you required, and you should set `ATTENUATION` to `false` because the current version only support isotropic elastic model. And you can set some other parameters like `SIMULATION_TYPE`. If `SIMULATION_TYPE` is not `moment`, you should also edit `inparam_source`.
+1.  **Configure Macros:** Navigate to the `axisem` directory and update the compiler options in `make_axisem.macros`.
+    * Ensure `USE_NETCDF = true`.
+    * Set the correct `NETCDF_PATH`.
 
-In `inparam_advanced`, you should set the part of several parameters as below:
-```bash 
-# GLL points to save, starting and ending GLL point index 
-# (overwritten with 0 and npol for dumptype displ_only)
+2.  **Configure Mesher:** Navigate to `MESHER/` and edit `inparam_mesh`.
+    * Set `DOMINANT_PERIOD` and the number of slices. 
+    * **Note:** Ensure the dominant period is slightly shorter than the minimum period used in the SEM (refer to `output_generate_databases.txt` in SPECFEM).
+    * **Optional:** To use a smoothed version of the **ak135/prem** model, run the scripts in `smooth_model/main.py` and configure the parameters as follows:
+        ```bash
+        BACKGROUND_MODEL external
+        EXT_MODEL ak135.smooth.bm
+        ```
+
+3.  **Generate Mesh:** Execute the generation and migration scripts:
+    ```bash
+    ./submit.csh
+    ./movemesh.csh <mesh_name>
+    ```
+    The mesh files will be moved to `SOLVER/MESHES/<mesh_name>`.
+
+---
+
+## Prepare AxiSEM Solver Files
+
+You must edit two primary configuration files: `inparam_basic` and `inparam_advanced`.
+
+### 1. `inparam_basic`
+* Set `SEISMOGRAM_LENGTH` to your requirements.
+* Set `ATTENUATION` to `false` (the current version supports isotropic elastic models only).
+* Adjust `SIMULATION_TYPE`. If it is not set to `moment`, you must also edit `inparam_source`.
+
+### 2. `inparam_advanced`
+Configure the wavefield kernel parameters as follows:
+
+```fortran
+# GLL points to save (starting and ending indices)
 KERNEL_IBEG         0
 KERNEL_IEND         4
 KERNEL_JBEG         0
@@ -69,31 +121,63 @@ KERNEL_JEND         4
 
 KERNEL_WAVEFIELDS   true
 KERNEL_DUMPTYPE     displ_only
-KERNEL_SPP          8/16/32 (depend on your dominant frequency)
 
-# you should add this one 
-# KERNEL  dump  after DUMP_T0
-DUMP_T0       200. 
+# Samples per period (choose based on dominant frequency)
+KERNEL_SPP          8  # or 16/32
 
-# epicenter distance
-KERNEL_COLAT_MIN   25.
-KERNEL_COLAT_MAX   100.
+# Time to start dumping
+DUMP_T0             200. 
 
-# minimal and maximal radius in km for kernel wavefields
-# (only for dumptype displ_only)
-KERNEL_RMIN        5000.
-KERNEL_RMAX        6372.
-```
-Then you can prepare your `CMTSOLUTION` and `STATIONS`. You can follow examples in `run_all_events.sh`, which will submit
-all events in `CMT_DIR`
+# Epicenter distance range
+KERNEL_COLAT_MIN    25.
+KERNEL_COLAT_MAX    100.
 
-## Run AxiSEM simulation
-Run it on your cluster.
-
-## Transpose the output field for better performance.
-Set the variables in `submit_transpose.sh`, then:
-```bash
-bash submit_transpose.sh 
+# Depth range (min/max radius in km)
+KERNEL_RMIN         5000.
+KERNEL_RMAX         6372.
 ```
 
-## Try examples in `EXAMPLES/` !
+### 3. Source and Station Setup
+Prepare your `CMTSOLUTION` and `STATIONS` files. You can refer to the examples in `run_all_events.sh`, which automates the submission for all events in the `CMT_DIR`.
+
+## Run AxiSEM Simulation
+Execute the simulation on your cluster according to your local scheduler (e.g., SLURM, PBS). Ensure your environment is correctly loaded before submission (`SOLVER/submit.csh`).
+
+## Transpose Output Field
+For significantly improved data access performance in post-processing, transpose the generated wavefield. 
+
+1. Edit the variables in `submit_transpose.sh` to match your simulation paths.
+2. Execute the script:
+   ```bash
+   bash submit_transpose.sh
+   ```
+
+## Getting Started with Examples
+
+To explore the library's capabilities, navigate to the `EXAMPLES/` directory. Configuration is handled via a `YAML` file, which allows you to define paths, coupling methods, and time windows.
+
+### Example Configuration (`param.yaml`)
+
+```yaml
+# Parameter settings for generating the injection field
+
+# Working Directories
+AXISEM_DIR: ../axisem/SOLVER/ak135 
+SPECFEM_DB: ~/SPECFEM/DATABASES_MPI    # Path to ${SPECFEM_DIR}/DATABASES_MPI
+SPECFEM_DATA: ~/SPECFEM/DATA           # Only needed for equivalent forces coupling
+SPECFEM_SYSTEM: 'cube2sph'             # Options: 'cart' or 'cube2sph'
+OUTPUT_DIR: './OUTPUT_DIR'
+
+# Signal Processing
+DOWN_SAMPLING: True                    # If true, down-samples to AxiSEM mesh T0/2 
+
+# Coupling Methods
+coupling_method: 'wd'                  # Options: 'wd' (Wavefield Discontinuity) or 'ef' (Equivalent Forces)
+UTM_ZONE: 10                           # UTM zone for cartesian systems (only if SYSTEM = 'cart')
+only_eq_force: False                   # Set to true to only compute equivalent forces
+
+# Time Window Settings
+t0: 124.3                              # Starting time (t0 = 0 is the earthquake origin time)
+dt: 0.025                              # Time step
+nt: 1000                               # Number of time steps
+```
