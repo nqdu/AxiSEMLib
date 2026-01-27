@@ -9,4 +9,4 @@
 module load gcc openmpi python/3.9.8 parallel-hdf5/gcc-8.3.0
 
 
-mpirun -np 120 python ../../run_coupling.py $param.yaml
+mpirun -np 120 python ../../run_coupling.py param.yaml
