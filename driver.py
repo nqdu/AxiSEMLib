@@ -3,7 +3,7 @@ import numpy as np
 import os  
 from mpi4py import MPI
 from utils import cart2sph,allocate_task
-from utils import resample_axisem
+from utils import resample_axisem,geodetic_to_geocentric
 from FortranIO import FortranIO  
 from jacobian import compute_jacobian_surface
 
@@ -26,6 +26,8 @@ def read_boundary_points(coordir:str,iproc:int):
     xx,yy,zz,nnx,nny,nnz = np.loadtxt(filename,dtype='f4',skiprows=1,unpack=True)
 
     return xx,yy,zz,nnx,nny,nnz 
+
+
 
 def get_field_proc_cart(args):
     from pyproj import Proj
@@ -64,7 +66,10 @@ def get_field_proc_cart(args):
 
     # convert to spherical coordinates
     p = Proj(proj='utm',zone=UTM_ZONE,ellps='WGS84')
-    stlo,stla = p(xx,yy,inverse=True)
+
+    # nqdu added, change the working latitude from geographic to geocentric
+    stlo,stla = p(xx,yy,inverse=True) # this is in geographic!
+    stla = geodetic_to_geocentric(stla)
     r = zz + 6371000
     stel = -6371000 + r
 

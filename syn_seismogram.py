@@ -1,5 +1,6 @@
 from database import AxiBasicDB
 import numpy as np
+from utils import geodetic_to_geocentric
 import os 
 import sys 
 
@@ -26,6 +27,7 @@ def main():
     for i in range(nsta):
         print(i+1,nsta)
         stla,stlo = np.float32(stacords[i,2:4])
+        stla = geodetic_to_geocentric(stla)
         ue,un,uz = db.syn_seismo(stla,stlo,0.,'enz',basedir + cmtfile)
         name = stacords[i,1] + "." + stacords[i,0]
         newname = "SEISMOGRAMS/" + name

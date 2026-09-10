@@ -95,6 +95,24 @@ def rotate_EN_to_UTM(ve:np.ndarray,vn:np.ndarray,gamma:float):
 
     return vx,vy
 
+def geodetic_to_geocentric(geographic_lat_deg, flattening=0.0033528106647474805):
+    """
+    Convert geographic (geodetic) latitude to geocentric latitude.
+    
+    Parameters:
+        geographic_lat_deg : float
+            Geographic latitude in degrees.
+        flattening : float
+            Flattening of the ellipsoid (default is WGS-84).
+    
+    Returns:
+        geocentric_lat_deg : float
+            Geocentric latitude in degrees.
+    """
+    phi = np.radians(geographic_lat_deg)
+    geocentric_phi = np.arctan((1 - flattening) ** 2 * np.tan(phi))
+    return np.degrees(geocentric_phi)
+
 def cart2sph(x,y,z):
     XsqPlusYsq = x**2 + y**2
     r = np.sqrt(XsqPlusYsq + z**2)               # r
