@@ -3,7 +3,8 @@ import h5py
 from tqdm import tqdm 
 import sys 
 from mpi4py import MPI
-import os 
+import os
+import subprocess
 
 def write_trans_data_dof(infile:str,dsetstr:str,out_dir:str, sizeGB:float=5.0):
     """
@@ -188,7 +189,14 @@ def main():
             print(f"repacking file {infile} ...")
             newname = infile + '.bak'
             os.rename(infile,newname)
-            os.system(f'h5repack {newname} {infile}')
+            try:
+                subprocess.run(['h5repack',newname,infile],check=True)
+            except (subprocess.CalledProcessError,FileNotFoundError) as e:
+                print(f"h5repack failed for {infile}: {e}, restoring original file")
+                if os.path.isfile(infile):
+                    os.remove(infile)
+                os.rename(newname,infile)
+                continue
             os.remove(newname)
 
     comm.Barrier()

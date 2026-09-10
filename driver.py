@@ -3,7 +3,7 @@ import numpy as np
 import os  
 from mpi4py import MPI
 from utils import cart2sph,allocate_task
-from utils import resample_axisem
+from utils import resample_axisem,geodetic_to_geocentric
 from FortranIO import FortranIO  
 from jacobian import compute_jacobian_surface
 
@@ -27,8 +27,11 @@ def read_boundary_points(coordir:str,iproc:int):
 
     return xx,yy,zz,nnx,nny,nnz 
 
+
+
 def get_field_proc_cart(args):
     from pyproj import Proj
+    from utils import rotate_EN_to_UTM
     from utils import rotation_matrix,rotate_tensor2
 
     # unpack input paramters
@@ -46,7 +49,6 @@ def get_field_proc_cart(args):
     # create dataset
     t0 = np.arange(db.nt) * db.dtsamp + db.t0
     t1 = tvec.copy()
-    dt1 = t1[1] - t1[0]
     nt1 = len(t1)
 
     # allocate space for veloc/traction
@@ -64,7 +66,10 @@ def get_field_proc_cart(args):
 
     # convert to spherical coordinates
     p = Proj(proj='utm',zone=UTM_ZONE,ellps='WGS84')
-    stlo,stla = p(xx,yy,inverse=True)
+
+    # nqdu added, change the working latitude from geographic to geocentric
+    stlo,stla = p(xx,yy,inverse=True) # this is in geographic!
+    stla = geodetic_to_geocentric(stla)
     r = zz + 6371000
     stel = -6371000 + r
 
@@ -80,13 +85,20 @@ def get_field_proc_cart(args):
         R[:,0] = tmp * 1.
         R = R.T
 
-        # get stress 
+        # get stress in ENZ
         sig_xyz = db.syn_stress(stla[ir],stlo[ir],stel[ir],basedir + '/CMTSOLUTION')
         sig_xyz = rotate_tensor2(sig_xyz,R)
         Tx = np.zeros((db.nt)); Ty = Tx *  1.; Tz = Tx * 1. 
 
         # synthetic displ in enz, note that enz is specfem3d's (xyz)
-        ux,uy,uz = db.syn_seismo(stla[ir],stlo[ir],stel[ir],'enz',basedir + '/CMTSOLUTION')
+        ue,un,uz = db.syn_seismo(stla[ir],stlo[ir],stel[ir],'enz',basedir + '/CMTSOLUTION')
+
+        # get meridian convergence angle in rad 
+        gamma = p.get_factors(stlo[ir],stla[ir]).meridian_convergence
+        gamma = np.deg2rad(gamma)
+
+        # rotate ue,un to UTM
+        ux,uy = rotate_EN_to_UTM(ue,un,gamma)
 
         # get velocity
         _,veloc_axi[:,ir,0] = resample_axisem(t0,ux,t1,
@@ -99,12 +111,14 @@ def get_field_proc_cart(args):
                                             deriv_order=1,
                                             f_dom=fmax)
                                              
-
         # traction
-        nx = nnx[ir]; ny = nny[ir]; nz = nnz[ir]
-        Tx = sig_xyz[0,:] * nx + sig_xyz[5,:] * ny + sig_xyz[4,:] * nz 
-        Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz 
+        nx = nnx[ir]; ny = nny[ir]; nz = nnz[ir] # note it's ENZ! 
+        Te = sig_xyz[0,:] * nx + sig_xyz[5,:] * ny + sig_xyz[4,:] * nz 
+        Tn = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz 
         Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz 
+
+        # rotate Tn/Te to UTM
+        Tx,Ty = rotate_EN_to_UTM(Te,Tn,gamma)
 
         trac_axi[:,ir,0],_ = resample_axisem(t0,Tx,t1,
                                         deriv_order=0,

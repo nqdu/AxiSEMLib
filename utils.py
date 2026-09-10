@@ -67,6 +67,52 @@ def rotate_tensor2(eps,R):
 
     return eps_xyz
 
+def rotate_EN_to_UTM(ve:np.ndarray,vn:np.ndarray,gamma:float):
+    """
+    rotate vector from (ve,vn) in spherical to (vx,vy) in utm coordinate
+
+    Parameters
+    -------------------
+    ve: np.ndarray
+        east component in spherical
+    vn: np.ndarray
+        north component in spherical
+    gamma: float
+        angle between meridian convergence angle, in rad
+    Returns
+    -------------------
+    vx: np.ndarray
+        x component in UTM
+    vy: np.ndarray
+        y component in UTM
+    """
+
+    # rotate 
+    cos_gama = np.cos(gamma)
+    sin_gama = np.sin(gamma)
+    vx = ve * cos_gama - vn * sin_gama
+    vy = ve * sin_gama + vn * cos_gama
+
+    return vx,vy
+
+def geodetic_to_geocentric(geographic_lat_deg, flattening=0.0033528106647474805):
+    """
+    Convert geographic (geodetic) latitude to geocentric latitude.
+    
+    Parameters:
+        geographic_lat_deg : float
+            Geographic latitude in degrees.
+        flattening : float
+            Flattening of the ellipsoid (default is WGS-84).
+    
+    Returns:
+        geocentric_lat_deg : float
+            Geocentric latitude in degrees.
+    """
+    phi = np.radians(geographic_lat_deg)
+    geocentric_phi = np.arctan((1 - flattening) ** 2 * np.tan(phi))
+    return np.degrees(geocentric_phi)
+
 def cart2sph(x,y,z):
     XsqPlusYsq = x**2 + y**2
     r = np.sqrt(XsqPlusYsq + z**2)               # r
