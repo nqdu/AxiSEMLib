@@ -36,10 +36,10 @@ def _read_face_points(path: Path) -> np.ndarray:
             if not line.strip():
                 continue
             columns = line.split()
-            if len(columns) != 6:
-                raise ValueError(f'{path}:{line_number}: expected x y z nx ny nz')
+            if len(columns) < 6:
+                raise ValueError(f'{path}:{line_number}: expected at least x y z nx ny nz')
             try:
-                rows.append([float(value) for value in columns])
+                rows.append([float(value) for value in columns[:6]])
             except ValueError as exc:
                 raise ValueError(f'{path}:{line_number}: invalid coordinate or normal') from exc
 
@@ -136,11 +136,12 @@ def read_boundary_points(
 
     # read points
     filename = coordir + '/proc%06d_normal.txt' %(iproc)
-    data = np.loadtxt(filename,dtype='f4',skiprows=1,ndmin=2)
+    data = np.loadtxt(filename,dtype='f4',skiprows=1,ndmin=2,usecols=range(6))
     if data.shape[0] == 0:
         return [[] for i in range(6)]
     
-    xx,yy,zz,nnx,nny,nnz = np.loadtxt(filename,dtype='f4',skiprows=1,unpack=True)
+    xx,yy,zz,nnx,nny,nnz = np.loadtxt(
+        filename,dtype='f4',skiprows=1,unpack=True,usecols=range(6))
 
     return xx,yy,zz,nnx,nny,nnz 
 
@@ -267,10 +268,11 @@ def get_field_proc_cart_boundary(
         raise ValueError('A boundary_wavefields.nc4 file is required')
 
     input_file = Path(coordir) / f'proc{iproc:06d}_normal.txt'
+    print(f'Synthesizing boundary wavefield for {input_file} ...', flush=True)
     with input_file.open() as stream:
         next(stream,None)
         rows = [line for line in stream if line.strip()]
-    data = np.loadtxt(rows,ndmin=2) if rows else np.empty((0,6))
+    data = np.loadtxt(rows,ndmin=2,usecols=range(6)) if rows else np.empty((0,6))
     npts = len(data)
     if npts % NGLL2:
         raise ValueError(f'{input_file}: expected 25 ordered points per face')
@@ -345,17 +347,17 @@ def get_field_proc_cart_boundary(
             stream.write_record(velocity[it],traction[it])
     db.close()
 
-def get_wavefield_sph(args: tuple[int, str, str, str, np.ndarray, bool]) -> None:
+def get_wavefield_sph(args: tuple[int, str, str, str, np.ndarray]) -> None:
     """
     get wavefield (displ/accel/traction) on the injection boundaries in spherical system
 
     Parameters
     -------------------
     args: tuple
-        (iproc,basedir,coordir,outdir,tvec,downsample)
+        (iproc,basedir,coordir,outdir,tvec)
     """
 
-    iproc,basedir,coordir,outdir,tvec,downsample = args
+    iproc,basedir,coordir,outdir,tvec = args
     datadir = coordir
     file_trac = datadir + "proc%06d_wavefield_discontinuity_faces"%iproc
     file_disp = datadir + "proc%06d_wavefield_discontinuity_points"%iproc
@@ -368,29 +370,8 @@ def get_wavefield_sph(args: tuple[int, str, str, str, np.ndarray, bool]) -> None
 
     # time vector
     t0 = np.arange(db.nt) * db.dtsamp + db.t0
-    t1 = tvec.copy()
+    t1 = tvec
     nt1 = len(t1)
-    if downsample:
-        dt_dsmp = min(db.dominant_T0 / 2 / 5., 0.5) # 1/5 of Nyquist freq = 1/(2T0) / 5
-        nt1 = int((t1[-1] - t1[0]) / dt_dsmp) + 1
-
-        # slightly lengthen t1 to [t1[0] - dt_dsmp, t1[-1] + dt_dsmp]
-        tnew = np.arange(nt1 + 2) * dt_dsmp + t1[0] - dt_dsmp
-        t1 = tnew.copy()
-        nt1 = len(t1)
-
-        # write info
-        if iproc == 0:
-            fio = open(outdir + "/wavefield_discontinuity_info.txt","w")
-            fio.write("%f\n" % (dt_dsmp))
-            fio.write("%d\n" % (nt1))
-            fio.close()
-    else: 
-        # sanity check
-        if iproc == 0:
-            if os.path.exists(outdir + "/wavefield_discontinuity_info.txt"):
-                # remove it
-                os.remove(outdir + "/wavefield_discontinuity_info.txt")
 
     # get fmax 
     fmax = 1.0 / db.dominant_T0
@@ -466,12 +447,12 @@ def get_wavefield_sph(args: tuple[int, str, str, str, np.ndarray, bool]) -> None
     fileio.close()
 
 def get_wavefield_sph_boundary(
-        args: tuple[int, str, str, str, np.ndarray, bool,
-                    list[int], np.ndarray, int]) -> None:
+        args: tuple[int, str, str, str, np.ndarray,
+                    list[int], np.ndarray]) -> None:
     """Write solid u/a/traction or fluid chi/ddchi/u by face."""
     from scipy.spatial import cKDTree
 
-    iproc,basedir,coordir,outdir,tvec,downsample,face_ids,face_points,first_proc = args
+    iproc,basedir,coordir,outdir,tvec,face_ids,face_points = args
     db = AxiBasicDB()
     db.read_basic(basedir + '/MZZ/Data/axisem_output.nc4')
     db.set_iodata(basedir)
@@ -479,18 +460,7 @@ def get_wavefield_sph_boundary(
         raise ValueError('A boundary_wavefields.nc4 file is required')
 
     t0 = db.sample_time
-    t1 = tvec.copy()
-    if downsample:
-        dt_dsmp = min(db.dominant_T0 / 10.0,0.5)
-        nstep = int((t1[-1]-t1[0])/dt_dsmp) + 1
-        t1 = np.arange(nstep+2)*dt_dsmp + t1[0] - dt_dsmp
-        if iproc == first_proc:
-            info_file = Path(outdir) / 'wavefield_discontinuity_info.txt'
-            info_file.write_text(f'{dt_dsmp:f}\n{len(t1)}\n')
-    elif iproc == first_proc:
-        info_file = Path(outdir) / 'wavefield_discontinuity_info.txt'
-        if info_file.exists():
-            info_file.unlink()
+    t1 = tvec
 
     fmax = 1.0 / db.dominant_T0
     nt = len(t1)
@@ -498,6 +468,7 @@ def get_wavefield_sph_boundary(
 
     # Map every (global iface, GLL point) to its unique SPECFEM point ID.
     point_file = Path(coordir) / f'proc{iproc:06d}_wavefield_discontinuity_points'
+    print(f'Synthesizing boundary wavefield for {point_file} ...', flush=True)
     if point_file.stat().st_size:
         points = np.loadtxt(point_file,ndmin=2)
     else:
@@ -909,6 +880,12 @@ def coupling_cube2sph(param: dict[str, Any]) -> None:
     rank = comm.Get_rank()
     nprocs = comm.Get_size()
 
+    # A reused output directory must not retain downsampling metadata.
+    if rank == 0:
+        (Path(param['OUTPUT_DIR']) / 'wavefield_discontinuity_info.txt').unlink(
+            missing_ok=True)
+    comm.Barrier()
+
     # allocate tasks
     startid,endid = allocate_task(ntasks,nprocs,rank)
     
@@ -920,13 +897,12 @@ def coupling_cube2sph(param: dict[str, Any]) -> None:
                 param['AXISEM_DIR'],
                 param['SPECFEM_DB'],
                 param['OUTPUT_DIR'],
-                t1,
-                param['DOWN_SAMPLING'])
+                t1)
 
         if face_by_proc:
             if proc not in face_by_proc:
                 raise ValueError(f'No boundary face file for SPECFEM processor {proc}')
-            args += face_by_proc[proc] + (proc_ids[0],)
+            args += face_by_proc[proc]
             get_wavefield_sph_boundary(args)
         else:
             get_wavefield_sph(args)
