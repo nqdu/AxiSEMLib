@@ -151,13 +151,27 @@ KERNEL_RMAX         6372.
 Prepare your `CMTSOLUTION` and `STATIONS` files. You can refer to the examples in `run_all_events.py`, which automates the submission for all events in the `CMT_DIR`. 
 
 **Use geographic coordinates** for all latitudes (event latitude in `CMTSOLUTION`, station latitudes in `STATIONS`, and the study region passed to the script). `run_all_events.py` automatically converts them from geodetic to geocentric latitudes before they are passed to AxiSEM, which assumes a spherical Earth. The original files in `CMT_DIR` are left unchanged.
-```bash
-cd SOLVER
-python run_all_events.py lonmin lonmax latmin latmax maxdep  # e.g. 114 132 41 46 450
-```
 
 ## Run AxiSEM Simulation
-Execute the simulation on your cluster according to your local scheduler (e.g., SLURM, PBS). Ensure your environment is correctly loaded before submission (`SOLVER/submit.csh`).
+
+Run the solver from `axisem/SOLVER` after preparing the mesh and the input files described above. If `SAVE_BDRY_FACES` is enabled, place `boundary_faces.dat` in this directory first. `submit.csh` builds the solver, creates a new run directory, copies the inputs, and starts the simulation. The run directory name must not already exist.
+
+For one run on the local machine:
+
+```bash
+cd axisem/SOLVER
+./submit.csh ak135.my_event
+```
+
+To submit that run through SLURM, use `./submit.csh ak135.my_event -q slurm` instead. Edit the scheduler settings in `submit.csh` for your cluster. Local runs start in the background; check the `OUTPUT_*` files in the new run directory for progress.
+
+To submit all events listed in `CMT_DIR/injection_time` through SLURM, run:
+
+```bash
+python run_all_events.py 114 132 41 46 450
+```
+
+The five arguments are the study region's geographic `lonmin lonmax latmin latmax` in degrees and maximum depth in kilometres. For each event, `run_all_events.py` updates the working `inparam_basic`, `inparam_advanced`, `CMTSOLUTION`, and `STATIONS`, converts geographic latitudes to geocentric latitudes, and calls `submit.csh` with `-q slurm`. It creates a run directory named `ak135.<event>`.
 
 ## Transpose Output Field
 For significantly improved data access performance in post-processing, transpose the generated wavefield. 
@@ -298,8 +312,6 @@ Both use Earth-centered Cartesian coordinates in m, with no header line.
 | `specfem3d_cart` | `proc??????_sol_axisem` | velocity and traction |
 | `cube2sph` | `proc??????_wavefield_discontinuity.bin` | displacement, acceleration and traction |
 
-For `cube2sph` with `DOWN_SAMPLING: True`, `wavefield_discontinuity_info.txt` is also written with the new time step and number of steps.
-
 ### Example Configuration (`param.yaml`)
 
 ```yaml
@@ -311,9 +323,6 @@ SPECFEM_DB: ~/SPECFEM/DATABASES_MPI    # Path to ${SPECFEM_DIR}/DATABASES_MPI
 SPECFEM_DATA: ~/SPECFEM/DATA           # Only needed for equivalent forces coupling
 SPECFEM_SYSTEM: 'cube2sph'             # Options: 'cart' or 'cube2sph'
 OUTPUT_DIR: './OUTPUT_DIR'
-
-# Signal Processing
-DOWN_SAMPLING: False                    # If true, down-samples to AxiSEM mesh T0/2 
 
 # Coupling Methods
 coupling_method: 'wd'                  # Options: 'wd' (Wavefield Discontinuity) or 'ef' (Equivalent Forces)

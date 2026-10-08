@@ -10,6 +10,7 @@ from utils import cart2sph, geodetic_to_geocentric
 
 
 EARTH_RADIUS_M = 6371000.0
+DEPTH_TOLERANCE_KM = 1e-6
 POINTS_PER_FACE = 25
 INPUT_PATTERNS = {
     'cube2sph': re.compile(r'proc(\d+)_wavefield_discontinuity_faces'),
@@ -30,30 +31,22 @@ def _processor_files(input_dir, system):
     return sorted(files)
 
 
-def _read_points(path, skip_header, allowed_columns):
-    """Read coordinates while retaining the original 25-point face order."""
-    rows = []
-    with path.open() as stream:
-        if skip_header:
-            next(stream, None)
-        for line_number, line in enumerate(stream, 2 if skip_header else 1):
-            if not line.strip():
-                continue
-            columns = line.split()
-            if len(columns) not in allowed_columns or (rows and len(columns) != len(rows[0])):
-                expected = 'x y z [nx ny nz]' if 3 in allowed_columns else 'x y z nx ny nz'
-                raise ValueError(f'{path}:{line_number}: expected {expected}')
-            try:
-                rows.append([float(value) for value in columns])
-            except ValueError as exc:
-                raise ValueError(f'{path}:{line_number}: invalid coordinate or normal') from exc
+def _read_points(path, skip_header):
+    """Read the first three coordinates in their original face order."""
+    if path.stat().st_size == 0:
+        return np.empty((0, 3), dtype=float)
 
-    if len(rows) % POINTS_PER_FACE:
-        raise ValueError(f'{path}: {len(rows)} points is not a multiple of {POINTS_PER_FACE}')
-    width = len(rows[0]) if rows else min(allowed_columns)
-    points = np.asarray(rows, dtype=float).reshape(-1, width)
+    try:
+        points = np.loadtxt(path, usecols=(0, 1, 2),
+                            skiprows=int(skip_header), ndmin=2)
+    except ValueError as exc:
+        raise ValueError(f'{path}: invalid coordinate') from exc
+    if len(points) == 0:
+        return np.empty((0, 3), dtype=float)
+    if len(points) % POINTS_PER_FACE:
+        raise ValueError(f'{path}: {len(points)} points is not a multiple of {POINTS_PER_FACE}')
     if not np.isfinite(points).all():
-        raise ValueError(f'{path}: nonfinite coordinate or normal')
+        raise ValueError(f'{path}: nonfinite coordinate')
     return points
 
 
@@ -77,8 +70,7 @@ def merge_surfaces(input_dir, output_file, system, utm_zone=None):
     converted = []
     face_sources = []
     for proc, path in _processor_files(input_dir, system):
-        points = _read_points(path, skip_header=(system == 'cart'),
-                              allowed_columns=(6,) if system == 'cart' else (3,6))
+        points = _read_points(path, skip_header=(system == 'cart'))
         if len(points):
             if system == 'cube2sph':
                 radius, latitude, longitude = cart2sph(*points[:, :3].T)
@@ -92,8 +84,10 @@ def merge_surfaces(input_dir, output_file, system, utm_zone=None):
             if not (np.isfinite(longitude).all() and np.isfinite(latitude).all()
                     and np.isfinite(depth_km).all()
                     and np.all((-90 <= latitude) & (latitude <= 90))
-                    and np.all((0 <= depth_km) & (depth_km <= EARTH_RADIUS_M/1000))):
+                    and np.all((-DEPTH_TOLERANCE_KM <= depth_km)
+                               & (depth_km <= EARTH_RADIUS_M/1000 + DEPTH_TOLERANCE_KM))):
                 raise ValueError(f'{path}: invalid converted longitude, latitude, or depth')
+            depth_km = np.clip(depth_km, 0.0, EARTH_RADIUS_M/1000)
             rows = np.column_stack((longitude, latitude, depth_km))
         else:
             rows = np.empty((0, 3))

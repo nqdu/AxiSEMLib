@@ -77,9 +77,6 @@ def _validate_config(config):
     except ValueError:
         errors.append("Time parameters must be numeric.")
 
-    if not isinstance(config.get('DOWN_SAMPLING'), bool):
-        errors.append("DOWN_SAMPLING must be a boolean.")
-
     # --- 6. Report ---
     if warnings:
         print("\n[!] Warnings:")
