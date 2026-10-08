@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np 
 import h5py 
 from utils import rotation_matrix,rotate_tensor2
@@ -11,6 +12,13 @@ class AxiBasicDB:
         ncfile : str
             input netcdf file 
         """
+        boundary_file = Path(ncfile).with_name('boundary_wavefields.nc4')
+        if boundary_file.is_file():
+            self._read_boundary_basic(boundary_file)
+            return
+
+        self._boundary_mode = False
+
         # load library
         from scipy.spatial import KDTree
 
@@ -95,11 +103,118 @@ class AxiBasicDB:
 
         # field cache
         self._field_cache:dict[tuple[str,int],np.ndarray] = {}
+
+    def _read_boundary_basic(self,boundary_file:Path) -> None:
+        """Read the selected boundary mesh and metadata from a solver run."""
+        from scipy.spatial import KDTree
+
+        # The boundary file owns the mesh; the standard output still owns source metadata.
+        output_file = boundary_file.with_name('axisem_output.nc4')
+        if not output_file.is_file():
+            raise FileNotFoundError(f'Source metadata is missing: {output_file}')
+
+        self._boundary_mode = True
+        self.boundary_file = boundary_file
+        with h5py.File(output_file,'r') as source, h5py.File(boundary_file,'r') as boundary:
+            mesh = boundary['Mesh']
+
+            # Set array sizes and sampling information for later interpolation.
+            self.nspec = len(mesh['elements'])
+            self.nctrl = len(mesh['control_points'])
+            self.ngll = len(boundary['npol'])
+            self.nt = len(boundary['sample_time'])
+            self.sample_time = boundary['sample_time'][:]
+            self.nglob = len(boundary['point'])
+            if self.nt > 1:
+                self.dtsamp = float(self.sample_time[1] - self.sample_time[0])
+            else:
+                self.dtsamp = float(source.attrs['strain dump sampling rate in sec'][0])
+            self.t0 = float(self.sample_time[0])
+            self.shift = float(source.attrs['source shift factor in sec'][0])
+            self.dominant_T0 = float(source.attrs['dominant source period'][0])
+
+            # Read the source position and rotation used to combine modal fields.
+            self.evdp = float(source.attrs['source depth in km'][0])
+            evcola = float(source.attrs['Source colatitude'][0])
+            evlo = float(source.attrs['Source longitude'][0])
+            self.evla = 90 - np.rad2deg(evcola)
+            self.evlo = np.rad2deg(evlo)
+            self.mag = float(source.attrs['scalar source magnitude'][0])
+            self.rot_s = rotation_matrix(evcola, evlo)
+
+            # Load geometry and material data needed by the existing SEM routines.
+            self.mesh_s = mesh['mesh_S'][:]
+            self.mesh_z = mesh['mesh_Z'][:]
+            self.xmu = mesh['mesh_mu'][:]
+            self.xlamda = mesh['mesh_lambda'][:]
+            self.xxi = mesh['mesh_xi'][:]
+            self.xphi = mesh['mesh_phi'][:]
+            self.xeta = mesh['mesh_eta'][:]
+            self.xrho = mesh['mesh_rho'][:]
+            self.is_elastic = np.mean(self.xmu, axis=(1, 2)) >= 1.0e-5
+            self.nspec_el = int(self.is_elastic.sum())
+            self.nspec_ac = self.nspec - self.nspec_el
+
+            self.eltype = mesh['eltype'][:]
+            self.axis = mesh['axis'][:]
+            self.skelid = mesh['fem_mesh'][:]
+            self.ibool = mesh['sem_mesh'][:]
+            self.G0 = mesh['G0'][:]
+            self.G1 = mesh['G1'][:].T
+            self.G2 = mesh['G2'][:].T
+            self.G1T = np.require(self.G1.T, requirements=['F_CONTIGUOUS'])
+            self.G2T = np.require(self.G2.T, requirements=['F_CONTIGUOUS'])
+            self.gll = mesh['gll'][:]
+            self.glj = mesh['glj'][:]
+
+            # Index element centers to support the usual receiver location lookup.
+            middle = self.ngll // 2
+            midpoints = np.column_stack((self.mesh_s[:,middle,middle],
+                                         self.mesh_z[:,middle,middle]))
+            self.kdtree = KDTree(data=midpoints)
+
+            # Keep each face's point order and its location in the selected mesh.
+            self.face_phase = boundary['face_phase'][:]
+            self.face_index = boundary['face_index'][:]
+            self.point_in_face = boundary['point_in_face'][:]
+            self.point_element_slot = boundary['point_element_slot'][:]
+            self.point_mesh_index = boundary['point_mesh_index'][:]
+            self.point_xi = boundary['xi'][:]
+            self.point_eta = boundary['eta'][:]
+            self.point_longitude = boundary['longitude'][:]
+            self.point_latitude = boundary['latitude'][:]
+            self.point_depth_km = boundary['depth_km'][:]
+            self.point_source_phi = boundary['source_phi'][:]
+            self.solid_element_to_mesh = (boundary['solid_element_to_mesh'][:]
+                                          if 'solid_element_to_mesh' in boundary
+                                          else np.empty(0,dtype=int))
+            self.fluid_element_to_mesh = (boundary['fluid_element_to_mesh'][:]
+                                          if 'fluid_element_to_mesh' in boundary
+                                          else np.empty(0,dtype=int))
+
+        # Map mesh indices to the compact solid and fluid wavefield arrays.
+        self._solid_mesh_to_slot = {int(mesh):slot
+                                    for slot,mesh in enumerate(self.solid_element_to_mesh)}
+        self._fluid_mesh_to_slot = {int(mesh):slot
+                                    for slot,mesh in enumerate(self.fluid_element_to_mesh)}
+        self.iodict = {}
+        self._nc_handles = {}
+        self._field_cache = {}
+        self._is_dof_file = False
     
     def __copy__(self):
         """
         shallow copy of necessary basic variables
         """
+        if getattr(self, '_boundary_mode', False):
+            # Share fixed mesh metadata, then let the copy open its own field files.
+            db = AxiBasicDB()
+            db.__dict__.update(self.__dict__)
+            db.iodict = {}
+            db._nc_handles = {}
+            db._field_cache = {}
+            return db
+
         db = AxiBasicDB()
 
         # shallow copy of necessary variables
@@ -165,6 +280,10 @@ class AxiBasicDB:
             set_iodata('/path/to/axisem/solver/simudir')
         )
         """
+        if getattr(self, '_boundary_mode', False):
+            self._set_boundary_iodata(Path(ncfile_dir))
+            return
+
         import os 
         for stype in ['MZZ',"MXX_P_MYY","MXZ_MYZ","MXY_MXX_M_MYY","PZ","PX","PY"]:
             dirname = ncfile_dir + '/' + stype
@@ -188,14 +307,75 @@ class AxiBasicDB:
         # check if iodit is empty
         if len(self.iodict) == 0 :
             print(f"no data has been accessed, please check {ncfile_dir}!")
+
+    def _set_boundary_iodata(self,run_dir:Path) -> None:
+        """Open element-major binaries, or the NetCDF arrays before transposition."""
+        fields = ('disp_s', 'disp_z', 'disp_p', 'chi')
+        for stype in ('MZZ', 'MXX_P_MYY', 'MXZ_MYZ', 'MXY_MXX_M_MYY', 'PZ', 'PX', 'PY'):
+            data_dir = run_dir / stype / 'Data'
+            ncfile = data_dir / 'boundary_wavefields.nc4'
+            if not ncfile.is_file():
+                continue
+
+            # All source components must describe the same ordered face points.
+            handle = h5py.File(ncfile, 'r')
+            if not (np.array_equal(handle['face_index'][:], self.face_index)
+                    and np.array_equal(handle['face_phase'][:], self.face_phase)
+                    and np.array_equal(handle['point_mesh_index'][:], self.point_mesh_index)
+                    and np.array_equal(handle['point_element_slot'][:], self.point_element_slot)
+                    and np.array_equal(handle['xi'][:], self.point_xi)
+                    and np.array_equal(handle['eta'][:], self.point_eta)
+                    and np.array_equal(handle['source_phi'][:], self.point_source_phi)
+                    and np.array_equal(handle['sample_time'][:], self.sample_time)):
+                handle.close()
+                raise ValueError(f'Boundary point mapping differs in {ncfile}')
+
+            # Prefer transposed binaries and use NetCDF arrays when binaries are absent.
+            needs_handle = False
+            for field in fields:
+                if field == 'chi':
+                    nelem = len(self.fluid_element_to_mesh)
+                else:
+                    nelem = len(self.solid_element_to_mesh)
+                if nelem == 0:
+                    continue
+
+                shape = (nelem, self.ngll, self.ngll, self.nt)
+                binary = data_dir / f'{field}.bin'
+                key = f'{stype}/{field}'
+                if binary.is_file():
+                    expected = int(np.prod(shape)) * np.dtype('f4').itemsize
+                    if binary.stat().st_size != expected:
+                        handle.close()
+                        raise ValueError(f'{binary} has {binary.stat().st_size} bytes; '
+                                         f'expected {expected}')
+                    self.iodict[key] = np.memmap(binary, dtype='f4', mode='r', shape=shape)
+                elif field in handle:
+                    self.iodict[key] = handle[field]
+                    needs_handle = True
+
+            # Retain a NetCDF handle only while its datasets are in use.
+            if needs_handle:
+                self._nc_handles[stype] = handle
+            else:
+                handle.close()
+
+        if not self.iodict:
+            raise FileNotFoundError(f'No boundary wavefields found in {run_dir}')
     
     def copy(self):
         return self.__copy__()
     
     def close(self):
-        for _,val in self.iodict.items():
-            val.close()
+        # Release both mapped binaries and any NetCDF datasets kept open.
+        for val in self.iodict.values():
+            if isinstance(val, np.memmap):
+                val._mmap.close()
+        for handle in getattr(self, '_nc_handles', {}).values():
+            handle.close()
+        self._nc_handles = {}
         self.iodict = {}
+        self._field_cache = {}
     
     def set_source(self,evla:float,evlo:float):
         """
@@ -246,15 +426,11 @@ class AxiBasicDB:
         id_elem = None 
 
         # get nearest 10 points 
-        points = self.kdtree.query([s,z],k=10)[1]
+        points = np.atleast_1d(self.kdtree.query([s,z],k=min(10,self.nspec))[1])
         for tol in [1e-3, 1e-2, 5e-2, 8e-2]:
             for idx in points:
-                skel = np.zeros((self.nctrl,2))
-                ctrl_id = self.skelid[idx,:]
+                skel = self._element_skeleton(idx)
                 eltype = self.eltype[idx]
-                for i in range(self.nctrl):
-                    skel[i,0] = self.mesh_s[ctrl_id[i]]
-                    skel[i,1] = self.mesh_z[ctrl_id[i]]
 
                 isin,xi,eta = inside_element(s,z,skel,eltype,tolerance=tol)
                 if isin:
@@ -265,6 +441,17 @@ class AxiBasicDB:
                 break 
         
         return id_elem,xi,eta
+
+    def _element_skeleton(self, elemid:int) -> np.ndarray:
+        if getattr(self, '_boundary_mode', False):
+            # Boundary meshes store nodal coordinates, so derive the four corners.
+            s = self.mesh_s[elemid]
+            z = self.mesh_z[elemid]
+            corners = ((0,0), (0,-1), (-1,-1), (-1,0))
+            return np.array([(s[i,j], z[i,j]) for i,j in corners], dtype=float)
+
+        ctrl_id = self.skelid[elemid]
+        return np.column_stack((self.mesh_s[ctrl_id], self.mesh_z[ctrl_id]))
     
     def _get_field_elem(self,stype:str,fieldkey:str,elemid:int) -> np.ndarray:
         """
@@ -288,9 +475,23 @@ class AxiBasicDB:
         # check 
         key = stype + '/' + fieldkey
         if key not in self.iodict:
+            if (getattr(self, '_boundary_mode', False)
+                    and (fieldkey != 'disp_p'
+                         or self._get_excitation_type(stype) != 'monopole')):
+                raise FileNotFoundError(f'Missing boundary field {key}')
             return np.zeros((self.ngll,self.ngll,self.nt),dtype='f4')
 
         fio = self.iodict[key]
+        if getattr(self, '_boundary_mode', False):
+            # Translate a mesh element index into its phase-specific storage slot.
+            slots = self._fluid_mesh_to_slot if fieldkey == 'chi' else self._solid_mesh_to_slot
+            if elemid not in slots:
+                raise ValueError(f'Element {elemid} has no {fieldkey} wavefield')
+            slot = slots[elemid]
+            if isinstance(fio, h5py.Dataset):
+                return np.moveaxis(fio[:,slot,:,:], 0, -1).copy()
+            return fio[slot].copy()
+
         if self._is_dof_file:
             # check if (elemid,fieldkey) is in cache
             cache_key = (key, elemid)
@@ -332,6 +533,9 @@ class AxiBasicDB:
             s,p,z components 
             
         """
+        if getattr(self, '_boundary_mode', False) and not self.is_elastic[elemid]:
+            return self._get_element_displ_fluid(elemid,xi,eta,stype)
+
         from sem_funcs import lagrange_interpol_2D_td
         nt = self.nt 
 
@@ -357,6 +561,49 @@ class AxiBasicDB:
         up = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,1],xi,eta)
         uz = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,2],xi,eta)
         
+        return us,up,uz
+
+    def _get_chi(self,elem,xi,eta,stype):
+        from sem_funcs import lagrange_interpol_2D_td
+
+        values = self._get_field_elem(stype,'chi',elem)
+        nodes_xi = self.glj if self.axis[elem] == 1 else self.gll
+        return lagrange_interpol_2D_td(nodes_xi,self.gll,values.transpose(2,1,0),xi,eta)
+
+    def _get_element_displ_fluid(self,elem,xi,eta,stype):
+        """Derive modal fluid displacement from chi and the selected mesh."""
+        from sem_funcs import strain_td,lagrange_interpol_2D_td
+
+        # Arrange chi as the s component expected by the existing strain routine.
+        values = self._get_field_elem(stype,'chi',elem)
+        utemp = np.zeros((self.nt,self.ngll,self.ngll,3),dtype=float)
+        utemp[:,:,:,0] = values.transpose(2,1,0)
+
+        is_axi = self.axis[elem] == 1
+        sgll = self.glj if is_axi else self.gll
+        GT = self.G1T if is_axi else self.G2T
+
+        # With chi in the s slot, monopole strain contains dchi/ds,
+        # chi/s, and dchi/dz in components 0, 1, and 4, respectively.
+        strain = strain_td(utemp,self.G2,GT,sgll,self.gll,self.ngll-1,self.nt,
+                           self._element_skeleton(elem),self.eltype[elem],is_axi,'monopole')
+
+        # Interpolate the gradient and convert it to displacement using local density.
+        rho = lagrange_interpol_2D_td(
+            sgll,self.gll,self.xrho[elem].T[None,:,:],xi,eta)[0]
+        if rho <= 0:
+            raise ValueError(f'Invalid density in fluid element {elem}')
+
+        us = lagrange_interpol_2D_td(sgll,self.gll,strain[:,:,:,0],xi,eta)/rho
+        uz = 2*lagrange_interpol_2D_td(sgll,self.gll,strain[:,:,:,4],xi,eta)/rho
+        order = {'monopole':0,'dipole':1,'quadpole':2}[self._get_excitation_type(stype)]
+
+        # Only nonzero azimuthal orders contribute an azimuthal component.
+        if order == 0:
+            up = np.zeros_like(us)
+        else:
+            up = order*lagrange_interpol_2D_td(sgll,self.gll,strain[:,:,:,1],xi,eta)/rho
+
         return us,up,uz
     
     def _get_excitation_type(self,stype:str) -> str :
@@ -407,11 +654,8 @@ class AxiBasicDB:
             sgll = self.glj
 
         # control points
-        skel = np.zeros((self.nctrl,2))
-        ctrl_id = self.skelid[elemid,:]
+        skel = self._element_skeleton(elemid)
         eltype = self.eltype[elemid]
-        skel[:,0] = self.mesh_s[ctrl_id]
-        skel[:,1] = self.mesh_z[ctrl_id]
         if is_axi:
             G = self.G2 
             GT = self.G1T 
@@ -486,11 +730,8 @@ class AxiBasicDB:
             sgll = self.glj
 
         # control points
-        skel = np.zeros((self.nctrl,2))
-        ctrl_id = self.skelid[elemid,:]
+        skel = self._element_skeleton(elemid)
         eltype = self.eltype[elemid]
-        skel[:,0] = self.mesh_s[ctrl_id]
-        skel[:,1] = self.mesh_z[ctrl_id]
 
         if self.axis[elemid]:
             G = self.G2 
@@ -611,11 +852,8 @@ class AxiBasicDB:
             sgll = self.glj
 
         # control points
-        skel = np.zeros((self.nctrl,2))
-        ctrl_id = self.skelid[elemid,:]
+        skel = self._element_skeleton(elemid)
         eltype = self.eltype[elemid]
-        skel[:,0] = self.mesh_s[ctrl_id]
-        skel[:,1] = self.mesh_z[ctrl_id]
 
         if self.axis[elemid]:
             G = self.G2 
@@ -801,6 +1039,168 @@ class AxiBasicDB:
             u2 = temp.copy()
 
         return u1,u2,u3
+
+    def _surface_points(self, iface:int) -> tuple[int, np.ndarray]:
+        # Select the requested zero-based face in its original 25-point order.
+        if not getattr(self, '_boundary_mode', False):
+            raise RuntimeError('read_basic must load a boundary_wavefields.nc4 file first')
+        if not isinstance(iface, (int, np.integer)) or not 0 <= iface < len(self.face_phase):
+            raise IndexError(f'iface must be between 0 and {len(self.face_phase)-1}')
+
+        points = np.flatnonzero(self.face_index == iface)
+        points = points[np.argsort(self.point_in_face[points])]
+        if len(points) != 25 or not np.array_equal(self.point_in_face[points], np.arange(1,26)):
+            raise ValueError(f'Face {iface} does not have 25 ordered points')
+
+        # Check that compact storage slots agree with the saved mesh indices.
+        phase = int(self.face_phase[iface])
+        if phase not in (0, 1):
+            raise ValueError(f'Unknown phase {phase} for face {iface}')
+        mapping = self.solid_element_to_mesh if phase == 0 else self.fluid_element_to_mesh
+        if (np.any(self.point_element_slot[points] < 0)
+                or np.any(self.point_element_slot[points] >= len(mapping))):
+            raise ValueError(f'Invalid element slot on face {iface}')
+        if not np.array_equal(mapping[self.point_element_slot[points]],
+                              self.point_mesh_index[points]):
+            raise ValueError(f'Element slot and mesh index disagree on face {iface}')
+
+        return phase, points
+
+    def _surface_source_terms(self, source, is_moment:bool, phi:float):
+        """Use the same modal source coefficients as syn_seismo/syn_stress."""
+        cosphi = np.cos(phi)
+        sinphi = np.sin(phi)
+
+        if is_moment:
+            mzz,mxx,myy,mxz,myz,mxy = source
+            cos2phi = np.cos(2*phi)
+            sin2phi = np.sin(2*phi)
+            return (
+                ('MZZ',mzz,0.),
+                ('MXX_P_MYY',mxx+myy,0.),
+                ('MXZ_MYZ',mxz*cosphi+myz*sinphi,
+                 myz*cosphi-mxz*sinphi),
+                ('MXY_MXX_M_MYY',(mxx-myy)*cos2phi+2*mxy*sin2phi,
+                 -(mxx-myy)*sin2phi+2*mxy*cos2phi),
+            )
+
+        fx,fy,fz = source
+        return (
+            ('PZ',fz,0.),
+            ('PX',fx*cosphi+fy*sinphi,-fx*sinphi+fy*cosphi),
+        )
+
+    def syn_surface_wavefield(self, iface:int, comp:str='enz', cmtfile=None,
+                              forcevec=None, print_output:bool=True):
+        """Print and return a face's displacement (solid) or chi (fluid).
+
+        Face indices are 0-based. Displacement has shape (25,3,nt) and chi
+        has shape (25,nt). Components may be 'enz', 'xyz', or 'spz'. Set
+        print_output=False when collecting many faces without console output.
+        """
+        comp = comp.lower()
+        if comp not in ('enz','xyz','spz'):
+            raise ValueError("comp must be 'enz', 'xyz', or 'spz'")
+
+        phase, points = self._surface_points(iface)
+        if (cmtfile is None) == (forcevec is None):
+            raise ValueError('Specify exactly one of cmtfile or forcevec')
+
+        is_moment = cmtfile is not None
+        source = self.read_cmt(cmtfile) if is_moment else forcevec
+        wavefield = np.zeros((25,self.nt) if phase == 1 else (25,3,self.nt), dtype=float)
+
+        # Combine source modes at each point, then rotate solid displacement.
+        for row,point in enumerate(points):
+            elem = int(self.point_mesh_index[point])
+            xi,eta = self.point_xi[point],self.point_eta[point]
+            latitude,longitude = self.point_latitude[point],self.point_longitude[point]
+            _,phi = self.compute_tp_recv(latitude,longitude)
+            terms = self._surface_source_terms(source,is_moment,phi)
+
+            # Fluid faces expose chi directly; solid faces expose displacement.
+            if phase == 1:
+                for stype,a,_ in terms:
+                    wavefield[row] += a*self._get_chi(elem,xi,eta,stype)
+                continue
+
+            us = np.zeros(self.nt)
+            up = np.zeros(self.nt)
+            uz = np.zeros(self.nt)
+            for stype,a,b in terms:
+                us1,up1,uz1 = self._get_displ(elem,xi,eta,stype)
+                us += a*us1
+                up += b*up1
+                uz += a*uz1
+
+            R1 = np.array([[np.cos(phi),-np.sin(phi),0.],
+                           [np.sin(phi), np.cos(phi),0.],
+                           [0.,0.,1.]])
+
+            if comp == 'spz':
+                R = np.eye(3)
+            elif comp == 'xyz':
+                R = self.rot_s @ R1
+            else:
+                Rlocal = rotation_matrix(np.deg2rad(90-latitude),
+                                         np.deg2rad(longitude))
+                R = Rlocal.T @ self.rot_s @ R1
+
+            result = R @ np.stack((us,up,uz))
+            if comp == 'enz':
+                wavefield[row] = np.stack((result[1],-result[0],result[2]))
+            else:
+                wavefield[row] = result
+
+        if print_output:
+            print(wavefield)
+        return wavefield
+
+    def syn_surface_derived_fields(self, iface:int, cmtfile=None, forcevec=None,
+                                   print_output:bool=True):
+        """Print and return XYZ stress (solid) or XYZ displacement (fluid)."""
+        phase, points = self._surface_points(iface)
+        if (cmtfile is None) == (forcevec is None):
+            raise ValueError('Specify exactly one of cmtfile or forcevec')
+
+        is_moment = cmtfile is not None
+        source = self.read_cmt(cmtfile) if is_moment else forcevec
+        derived = np.zeros((25,6,self.nt) if phase == 0 else (25,3,self.nt),dtype=float)
+
+        # Derive stress in solids and displacement from chi in fluids.
+        for row,point in enumerate(points):
+            elem = int(self.point_mesh_index[point])
+            xi,eta = self.point_xi[point],self.point_eta[point]
+            latitude,longitude = self.point_latitude[point],self.point_longitude[point]
+            _,phi = self.compute_tp_recv(latitude,longitude)
+            terms = self._surface_source_terms(source,is_moment,phi)
+
+            R1 = np.array([[np.cos(phi),-np.sin(phi),0.],
+                           [np.sin(phi), np.cos(phi),0.],
+                           [0.,0.,1.]])
+
+            # Use the same modal weights as the ordinary stress and seismogram paths.
+            if phase == 0:
+                sigma = np.zeros((6,self.nt))
+                for stype,a,b in terms:
+                    stress = self._get_stress(elem,xi,eta,stype)
+                    sigma[[0,1,2,4]] += a*stress[[0,1,2,4]]
+                    sigma[[3,5]] += b*stress[[3,5]]
+                derived[row] = rotate_tensor2(sigma,self.rot_s @ R1)
+            else:
+                us = np.zeros(self.nt)
+                up = np.zeros(self.nt)
+                uz = np.zeros(self.nt)
+                for stype,a,b in terms:
+                    us1,up1,uz1 = self._get_element_displ_fluid(elem,xi,eta,stype)
+                    us += a*us1
+                    up += b*up1
+                    uz += a*uz1
+                derived[row] = (self.rot_s @ R1) @ np.stack((us,up,uz))
+
+        if print_output:
+            print(derived)
+        return derived
 
     def syn_strain(self,stla,stlo,stel,cmtfile=None,forcevec=None):
         # read source type

@@ -120,6 +120,7 @@ KERNEL_JBEG         0
 KERNEL_JEND         4
 
 KERNEL_WAVEFIELDS   true
+SAVE_BDRY_FACES     false  # set true to save the listed boundary faces
 KERNEL_DUMPTYPE     displ_only
 
 # Samples per period (choose based on dominant frequency)
@@ -136,6 +137,15 @@ KERNEL_COLAT_MAX    100.
 KERNEL_RMIN         5000.
 KERNEL_RMAX         6372.
 ```
+
+> **Note:** `SAVE_BDRY_FACES` defaults to `false`. To use it, set
+> `SAVE_BDRY_FACES true` alongside `KERNEL_WAVEFIELDS true` and `USE_NETCDF true`,
+> and put `boundary_faces.dat` in `axisem/SOLVER` before running `submit.csh`.
+> Each consecutive 25 rows defines one face as `longitude latitude depth_km`;
+> its 13th point determines whether the face is solid or fluid. The solver saves
+> the distinct touched elements to `boundary_wavefields.nc4` instead of the
+> usual kernel wavefield dump. `DUMP_T0` and `KERNEL_SPP` still set the sample
+> times; the other kernel dump selection settings do not select boundary points.
 
 ### 3. Source and Station Setup
 Prepare your `CMTSOLUTION` and `STATIONS` files. You can refer to the examples in `run_all_events.py`, which automates the submission for all events in the `CMT_DIR`. 
@@ -157,6 +167,76 @@ For significantly improved data access performance in post-processing, transpose
    ```bash
    bash submit_transpose.sh
    ```
+
+`transpose_fields.py` checks each Data directory for `boundary_wavefields.nc4`
+first, then `axisem_output.nc4`. Boundary fields are written as element-major
+`disp_*.bin` and `chi.bin`; standard fields retain the DOF layout. Run it with
+`python transpose_fields.py 2.0 RUN_DIR`; the numeric argument is the read-buffer
+size in GiB per MPI rank.
+
+For a run with boundary surfaces, `AxiBasicDB` reads the boundary mesh and
+uses either the transposed binary fields or the wavefields still in NetCDF:
+
+```python
+from database import AxiBasicDB
+
+db = AxiBasicDB()
+db.read_basic("RUN_DIR/MZZ/Data/axisem_output.nc4")
+db.set_iodata("RUN_DIR")
+wavefield = db.syn_surface_wavefield(0, cmtfile="RUN_DIR/CMTSOLUTION")
+derived = db.syn_surface_derived_fields(0, cmtfile="RUN_DIR/CMTSOLUTION")
+db.close()
+```
+
+Face indices start at zero. The first method prints and returns displacement
+`(25, 3, nt)` for a solid face or `chi (25, nt)` for a fluid face. The second
+prints and returns XYZ stress `(25, 6, nt)` for a solid face or XYZ acoustic
+displacement `(25, 3, nt)` for a fluid face. Solid displacement coordinates
+can be selected with `comp='enz'` (default), `'xyz'`, or `'spz'`.
+
+Use `surface_merge.py` to construct `axisem/SOLVER/boundary_faces.dat` from
+SPECFEM's `DATABASES_MPI` files:
+
+```bash
+python surface_merge.py cube2sph SPECFEM_DB axisem/SOLVER/boundary_faces.dat
+python surface_merge.py cart SPECFEM_DB axisem/SOLVER/boundary_faces.dat --utm-zone 10
+```
+
+For `cube2sph`, the script reads `proc??????_wavefield_discontinuity_faces`
+with either `x y z` or `x y z nx ny nz` rows, and converts the Earth-centered
+Cartesian `x y z` coordinates to longitude,
+geocentric latitude, and depth below a 6371 km Earth. For `cart`, it reads
+`proc??????_normal.txt`, inverts the specified UTM projection to geographic
+longitude and latitude, converts latitude to geocentric, and sets depth from
+the file's elevation `z` in meters. Cartesian rows contain
+`x y z nx ny nz`; any normal columns are omitted from the output. The script skips the first
+header line of each `proc*_normal.txt` file.
+The three-column `cube2sph` form is sufficient to build the AxiSEM input;
+the coupling driver still needs face normals to calculate traction.
+
+Each consecutive 25 input rows becomes one face. Files are merged by ascending
+numeric processor number, and `iface` is the zero-based cumulative face count;
+no coordinate lookup determines it. Empty processor files add no faces. The
+script rejects files whose data rows are not a multiple of 25. Its
+`merge_surfaces(...)` return value maps each `iface` to
+`(processor_number, local_face_index)`. `submit.csh` copies
+`boundary_faces.dat` into the run directory when `SAVE_BDRY_FACES` is enabled.
+When `boundary_wavefields.nc4` is present, `driver.py` selects separate
+boundary workers for Cartesian and `cube2sph` wavefield coupling. The
+`cube2sph` worker maps SPECFEM's unique points back to the ascending face
+indices; the Cartesian worker uses the cumulative 25-row face count.
+Equivalent-force output uses the corresponding
+face stress or acoustic fields.
+The boundary workers keep the existing record shapes and use these quantities:
+
+| Worker | Solid face | Fluid face |
+|---|---|---|
+| Cartesian | velocity / traction | `dchi` / acoustic displacement |
+| `cube2sph` | displacement / acceleration / traction | `chi` / `ddchi` / acoustic displacement |
+
+For fluid points, the scalar `dchi`, `chi`, or `ddchi` is repeated in all three
+components of its record. The third `cube2sph` record is ordered by face
+points. Equivalent-force coupling still derives acoustic traction from `ddchi`.
 
 ## Getting Started with Examples
 

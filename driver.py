@@ -5,9 +5,126 @@ from mpi4py import MPI
 from utils import cart2sph,allocate_task
 from utils import resample_axisem,geodetic_to_geocentric
 from FortranIO import FortranIO  
-from jacobian import compute_jacobian_surface
+from pathlib import Path
+from collections.abc import Sequence
+from typing import Any, TextIO
+import re
 
-def read_boundary_points(coordir:str,iproc:int):
+
+EARTH_RADIUS_M = 6371000.0
+NGLL2 = 25
+FACE_FILE = re.compile(r'proc(\d+)_wavefield_discontinuity_faces')
+
+
+def _processor_face_files(specfem_db: str | Path) -> list[tuple[int, Path]]:
+    """List cube2sph face files by numeric SPECFEM processor number."""
+    paths = []
+    for path in Path(specfem_db).glob('proc*_wavefield_discontinuity_faces'):
+        match = FACE_FILE.fullmatch(path.name)
+        if match:
+            paths.append((int(match.group(1)), path))
+    if not paths:
+        raise FileNotFoundError(f'No cube2sph face files in {specfem_db}')
+    return sorted(paths)
+
+
+def _read_face_points(path: Path) -> np.ndarray:
+    """Read Cartesian coordinates and normals in their original GLL order."""
+    rows = []
+    with path.open() as stream:
+        for line_number, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
+            columns = line.split()
+            if len(columns) != 6:
+                raise ValueError(f'{path}:{line_number}: expected x y z nx ny nz')
+            try:
+                rows.append([float(value) for value in columns])
+            except ValueError as exc:
+                raise ValueError(f'{path}:{line_number}: invalid coordinate or normal') from exc
+
+    if len(rows) % NGLL2:
+        raise ValueError(f'{path}: {len(rows)} points is not a multiple of {NGLL2}')
+    points = np.asarray(rows, dtype=float).reshape(-1, 6)
+    if not np.isfinite(points).all():
+        raise ValueError(f'{path}: nonfinite coordinate or normal')
+    return points
+
+
+def _cube2sph_faces(specfem_db: str | Path) -> tuple[
+        list[tuple[int, np.ndarray]], list[tuple[int, int]]]:
+    """Return faces and their zero-based (processor, local face) sources."""
+    blocks = []
+    sources = []
+    for proc, path in _processor_face_files(specfem_db):
+        points = _read_face_points(path)
+        blocks.append((proc, points))
+        sources.extend((proc, local_face) for local_face in range(len(points) // NGLL2))
+    if not sources:
+        raise ValueError(f'No boundary faces in {specfem_db}')
+    return blocks, sources
+
+
+def _validate_boundary_faces(db: AxiBasicDB,
+                             blocks: list[tuple[int, np.ndarray]]) -> None:
+    """Reject a solver boundary file built from different SPECFEM faces."""
+    points = np.concatenate([block for _, block in blocks], axis=0)
+    radius, latitude, longitude = cart2sph(*points[:, :3].T)
+    depth_km = (EARTH_RADIUS_M - radius) / 1000.0
+    if (len(points) != len(db.point_longitude)
+            or not np.allclose(longitude, db.point_longitude, atol=1e-5, rtol=0)
+            or not np.allclose(latitude, db.point_latitude, atol=1e-5, rtol=0)
+            or not np.allclose(depth_km, db.point_depth_km, atol=1e-3, rtol=0)):
+        raise ValueError('AxiSEM boundary faces differ from the cube2sph processor files')
+
+
+def _surface_traction(stress: np.ndarray, normals: np.ndarray) -> np.ndarray:
+    """Multiply XYZ Voigt stress by outward normals at the 25 face points."""
+    traction = np.empty((NGLL2, 3, stress.shape[-1]))
+    nx, ny, nz = normals.T
+    traction[:, 0] = stress[:, 0]*nx[:, None] + stress[:, 5]*ny[:, None] + stress[:, 4]*nz[:, None]
+    traction[:, 1] = stress[:, 5]*nx[:, None] + stress[:, 1]*ny[:, None] + stress[:, 3]*nz[:, None]
+    traction[:, 2] = stress[:, 4]*nx[:, None] + stress[:, 3]*ny[:, None] + stress[:, 2]*nz[:, None]
+    return traction
+
+
+def _fluid_surface_moment(db: AxiBasicDB, iface: int, normals: np.ndarray,
+                          displacement: np.ndarray) -> np.ndarray:
+    """Build the isotropic acoustic moment from normal displacement."""
+    from sem_funcs import lagrange_interpol_2D_td
+
+    _, points = db._surface_points(iface)
+    moment = np.zeros((NGLL2, 6, db.nt))
+    for row, point in enumerate(points):
+        elem = int(db.point_mesh_index[point])
+        nodes_xi = db.glj if db.axis[elem] == 1 else db.gll
+        bulk_modulus = lagrange_interpol_2D_td(
+            nodes_xi, db.gll, db.xlamda[elem].T[None, :, :],
+            db.point_xi[point], db.point_eta[point])[0]
+        pressure_jump = bulk_modulus * (normals[row] @ displacement[row])
+        moment[row, 0:3] = pressure_jump
+    return moment
+
+
+def _boundary_face_fields(db: AxiBasicDB, iface: int, cmtfile: str,
+                          comp: str = 'xyz') -> tuple[np.ndarray, np.ndarray]:
+    """Return solid displacement in comp, or XYZ acoustic displacement."""
+    if db.face_phase[iface] == 0:
+        displacement = db.syn_surface_wavefield(
+            iface, comp=comp, cmtfile=cmtfile, print_output=False)
+        stress = db.syn_surface_derived_fields(
+            iface, cmtfile=cmtfile, print_output=False)
+        return displacement, stress
+
+    displacement = db.syn_surface_derived_fields(
+        iface, cmtfile=cmtfile, print_output=False)
+    chi = db.syn_surface_wavefield(
+        iface, cmtfile=cmtfile, print_output=False)
+    return displacement, chi
+
+
+def read_boundary_points(
+        coordir: str, iproc: int) -> tuple[np.ndarray, ...] | list[list[float]]:
     """
     read specfem3D boundary points from proc*_normal.txt
 
@@ -29,7 +146,7 @@ def read_boundary_points(coordir:str,iproc:int):
 
 
 
-def get_field_proc_cart(args):
+def get_field_proc_cart(args: tuple[int, str, str, str, np.ndarray, int]) -> None:
     from pyproj import Proj
     from utils import rotate_EN_to_UTM
     from utils import rotation_matrix,rotate_tensor2
@@ -136,7 +253,99 @@ def get_field_proc_cart(args):
         
     f.close()
 
-def get_wavefield_sph(args):
+def get_field_proc_cart_boundary(
+        args: tuple[int, str, str, str, np.ndarray, int, int]) -> None:
+    """Write solid velocity/traction or fluid dchi/displacement by face."""
+    from pyproj import Proj
+    from utils import rotate_EN_to_UTM,rotation_matrix,rotate_tensor2
+
+    iproc,basedir,coordir,outdir,tvec,UTM_ZONE,first_iface = args
+    db = AxiBasicDB()
+    db.read_basic(basedir + '/MZZ/Data/axisem_output.nc4')
+    db.set_iodata(basedir)
+    if not db._boundary_mode:
+        raise ValueError('A boundary_wavefields.nc4 file is required')
+
+    input_file = Path(coordir) / f'proc{iproc:06d}_normal.txt'
+    with input_file.open() as stream:
+        next(stream,None)
+        rows = [line for line in stream if line.strip()]
+    data = np.loadtxt(rows,ndmin=2) if rows else np.empty((0,6))
+    npts = len(data)
+    if npts % NGLL2:
+        raise ValueError(f'{input_file}: expected 25 ordered points per face')
+    nt = len(tvec)
+    velocity = np.zeros((nt,npts,3),dtype='f4')
+    traction = np.zeros((nt,npts,3),dtype='f4')
+
+    if npts:
+        if data.shape[1] != 6:
+            raise ValueError(f'{input_file}: expected x y z nx ny nz')
+
+        # Convert UTM positions for local rotations; iface comes from row counts.
+        projection = Proj(proj='utm',zone=UTM_ZONE,ellps='WGS84')
+        longitude,latitude = projection(data[:,0],data[:,1],inverse=True)
+        latitude = geodetic_to_geocentric(latitude)
+        colat = np.deg2rad(90-latitude)
+        lonrad = np.deg2rad(longitude)
+
+        # Each consecutive 25-row block is one saved face.
+        cmtfile = basedir + '/CMTSOLUTION'
+        t0 = db.sample_time
+        fmax = 1.0 / db.dominant_T0
+        for local_face in range(npts//NGLL2):
+            iface = first_iface + local_face
+            displacement,derived = _boundary_face_fields(
+                db,iface,cmtfile,comp='enz')
+            is_solid = db.face_phase[iface] == 0
+
+            # Fill the 25 points while this face's synthesized fields are available.
+            for row in range(NGLL2):
+                ir = local_face*NGLL2 + row
+                R = rotation_matrix(colat[ir],lonrad[ir])
+                east = R[:,1].copy()
+                R[:,1] = -R[:,0]
+                R[:,0] = east
+                R = R.T
+                if is_solid:
+                    ue,un,uz = displacement[row]
+                else:
+                    ue,un,uz = R @ displacement[row]
+                gamma = np.deg2rad(
+                    projection.get_factors(longitude[ir],latitude[ir]).meridian_convergence)
+                ux,uy = rotate_EN_to_UTM(ue,un,gamma)
+
+                if is_solid:
+                    # Elastic faces carry velocity and traction in UTM coordinates.
+                    for component,values in enumerate((ux,uy,uz)):
+                        _,velocity[:,ir,component] = resample_axisem(
+                            t0,values,tvec,deriv_order=1,f_dom=fmax)
+
+                    nx,ny,nz = data[ir,3:]
+                    stress = rotate_tensor2(derived[row],R)
+                    te = stress[0]*nx + stress[5]*ny + stress[4]*nz
+                    tn = stress[5]*nx + stress[1]*ny + stress[3]*nz
+                    tz = stress[4]*nx + stress[3]*ny + stress[2]*nz
+                    tx,ty = rotate_EN_to_UTM(te,tn,gamma)
+                    for component,values in enumerate((tx,ty,tz)):
+                        traction[:,ir,component],_ = resample_axisem(
+                            t0,values,tvec,deriv_order=0,f_dom=fmax)
+                else:
+                    # Acoustic faces carry scalar dchi and vector displacement.
+                    _,dchi = resample_axisem(
+                        t0,derived[row],tvec,deriv_order=1,f_dom=fmax)
+                    velocity[:,ir,:] = dchi[:,None]
+                    for component,values in enumerate((ux,uy,uz)):
+                        traction[:,ir,component],_ = resample_axisem(
+                            t0,values,tvec,deriv_order=0,f_dom=fmax)
+
+    output_file = Path(outdir) / f'proc{iproc:06d}_sol_axisem'
+    with FortranIO(output_file,'w') as stream:
+        for it in range(nt):
+            stream.write_record(velocity[it],traction[it])
+    db.close()
+
+def get_wavefield_sph(args: tuple[int, str, str, str, np.ndarray, bool]) -> None:
     """
     get wavefield (displ/accel/traction) on the injection boundaries in spherical system
 
@@ -256,31 +465,103 @@ def get_wavefield_sph(args):
         fileio.write_record(tract[it,:,:])
     fileio.close()
 
-def _write_force_file(f,
-                      cords:np.ndarray,
-                      force:np.ndarray,
-                      stf_file:str,
-                      stf:np.ndarray):
-    """
-    write force file for cartesian coupling
+def get_wavefield_sph_boundary(
+        args: tuple[int, str, str, str, np.ndarray, bool,
+                    list[int], np.ndarray, int]) -> None:
+    """Write solid u/a/traction or fluid chi/ddchi/u by face."""
+    from scipy.spatial import cKDTree
 
-    Parameters
-    -------------------
-    fio: FortranIO
-        FortranIO object for writing
-    cords: np.ndarray
-        (nfaces, NGLL, NGLL, 3) array of (x,y,z) in m 
-    stf: np.ndarray
-        (nfaces_loc,NGLL, NGLL, 3,nt) equivalent force components on the surface element 
-    startid: int
-        starting face id for current proc 
-    nfaces_loc: int
-        number of faces for current proc 
-    only_eq_force: bool
-        whether only equivalent force is used 
-    stf1: np.ndarray
-        (nfaces_loc,NGLL, NGLL, 3,nt) equivalent force from moment tensor on the surface element 
-    """
+    iproc,basedir,coordir,outdir,tvec,downsample,face_ids,face_points,first_proc = args
+    db = AxiBasicDB()
+    db.read_basic(basedir + '/MZZ/Data/axisem_output.nc4')
+    db.set_iodata(basedir)
+    if not db._boundary_mode:
+        raise ValueError('A boundary_wavefields.nc4 file is required')
+
+    t0 = db.sample_time
+    t1 = tvec.copy()
+    if downsample:
+        dt_dsmp = min(db.dominant_T0 / 10.0,0.5)
+        nstep = int((t1[-1]-t1[0])/dt_dsmp) + 1
+        t1 = np.arange(nstep+2)*dt_dsmp + t1[0] - dt_dsmp
+        if iproc == first_proc:
+            info_file = Path(outdir) / 'wavefield_discontinuity_info.txt'
+            info_file.write_text(f'{dt_dsmp:f}\n{len(t1)}\n')
+    elif iproc == first_proc:
+        info_file = Path(outdir) / 'wavefield_discontinuity_info.txt'
+        if info_file.exists():
+            info_file.unlink()
+
+    fmax = 1.0 / db.dominant_T0
+    nt = len(t1)
+    cmtfile = basedir + '/CMTSOLUTION'
+
+    # Map every (global iface, GLL point) to its unique SPECFEM point ID.
+    point_file = Path(coordir) / f'proc{iproc:06d}_wavefield_discontinuity_points'
+    if point_file.stat().st_size:
+        points = np.loadtxt(point_file,ndmin=2)
+    else:
+        points = np.empty((0,3))
+    if len(face_points) != len(face_ids)*NGLL2:
+        raise ValueError(f'Processor {iproc} has an inconsistent face point count')
+    if len(face_points):
+        if not len(points):
+            raise ValueError(f'{point_file} is missing the processor face points')
+        distance,unique_ids = cKDTree(points[:,:3]).query(face_points[:,:3])
+        if np.any(distance > 1.0) or len(np.unique(unique_ids)) != len(points):
+            raise ValueError(f'{point_file} differs from the processor face points')
+        face_to_unique = dict(zip(face_ids,unique_ids.reshape(len(face_ids),NGLL2)))
+    else:
+        if len(points):
+            raise ValueError(f'{point_file} has points but processor {iproc} has no faces')
+        face_to_unique = {}
+
+    displacement = np.zeros((nt,len(points),3),dtype='f4')
+    acceleration = np.zeros_like(displacement)
+    third = np.zeros((nt,len(face_points),3),dtype='f4')
+
+    # Synthesize each face once and fill both unique-point and face-point output.
+    for local_face,iface in enumerate(face_ids):
+        face_start = local_face*NGLL2
+        normals = face_points[face_start:face_start+NGLL2,3:]
+        field,derived = _boundary_face_fields(db,iface,cmtfile)
+        if db.face_phase[iface] == 0:
+            stress_traction = _surface_traction(derived,normals)
+
+        for row in range(NGLL2):
+            unique_id = face_to_unique[iface][row]
+            face_id = face_start + row
+            if db.face_phase[iface] == 0:
+                for component in range(3):
+                    displacement[:,unique_id,component],acceleration[:,unique_id,component] = (
+                        resample_axisem(t0,field[row,component],t1,
+                                        deriv_order=2,f_dom=fmax))
+                    third[:,face_id,component],_ = resample_axisem(
+                        t0,stress_traction[row,component],t1,deriv_order=0,f_dom=fmax)
+            else:
+                # Repeat scalar chi and ddchi in all unique-point components.
+                chi,ddchi = resample_axisem(
+                    t0,derived[row],t1,deriv_order=2,f_dom=fmax)
+                displacement[:,unique_id,:] = chi[:,None]
+                acceleration[:,unique_id,:] = ddchi[:,None]
+                for component in range(3):
+                    third[:,face_id,component],_ = resample_axisem(
+                        t0,field[row,component],t1,deriv_order=0,f_dom=fmax)
+
+    output_file = Path(outdir) / f'proc{iproc:06d}_wavefield_discontinuity.bin'
+    with FortranIO(output_file,'w') as stream:
+        for it in range(nt):
+            stream.write_record(displacement[it])
+            stream.write_record(acceleration[it])
+            stream.write_record(third[it])
+    db.close()
+
+def _write_force_file(f: TextIO,
+                      cords: Sequence[float],
+                      force: Sequence[float],
+                      stf_file: str,
+                      stf: np.ndarray) -> None:
+    """Write a force source at (longitude, latitude, depth) and its time series."""
 
     f.write("FORCE 000\n")
     f.write("time shift:    0.\n")
@@ -290,20 +571,20 @@ def _write_force_file(f,
     f.write("depth:  %.6f\n" % (cords[2]))
     f.write("source time function:   0\n")
     f.write("factor force source:    1.0\n")
-    f.write("component dir vect source E: %f" %(force[0]))
-    f.write("component dir vect source N: %f" %(force[1]))
-    f.write("component dir vect source Z: %f" %(force[2]))
+    f.write("component dir vect source E: %f\n" %(force[0]))
+    f.write("component dir vect source N: %f\n" %(force[1]))
+    f.write("component dir vect source Z: %f\n" %(force[2]))
     f.write(f"{stf_file}\n")
     f1 = open(stf_file,'wb')
     byte = stf.tobytes()
     f1.write(byte)
     f1.close()
 
-def _write_mt_file(f,
-        cords:np.ndarray,
-        mt:np.ndarray,
-        stf_file:str,
-        stf:np.ndarray):
+def _write_mt_file(f: TextIO,
+                   cords: Sequence[float],
+                   mt: np.ndarray,
+                   stf_file: str,
+                   stf: np.ndarray) -> None:
     f.write("whoareyou\n")
     f.write("time shift:    0.")
     f.write("hdurorf0:    0.\n")
@@ -320,17 +601,16 @@ def _write_mt_file(f,
     f1 = open(stf_file,'wb')
     byte = stf.tobytes()
     f1.write(byte)
+    f1.close()
     f.write("\n")
 
-def equivalent_force_cube2sph(param:dict):
+def equivalent_force_cube2sph(param: dict[str, Any]) -> None:
     """
     equivalent force coupling in cube2sph system
     
     :param param: Description
     :type param: dict
     """
-    # glob
-    from glob import glob
     from jacobian import compute_jacobian_surface,moment_to_force
 
     # mpi 
@@ -341,50 +621,12 @@ def equivalent_force_cube2sph(param:dict):
     # constants
     NGLL:int = 5
 
-    # find how many procs used in specfem
-    filenames = glob(param['SPECFEM_DB'] + '/proc*_wavefield_discontinuity_faces')
-    npts = 0
-    for f in filenames:
-        # count no. of lines 
-        with open(f,'r') as fin:
-            npts += len(fin.readlines())
-    if npts == 0:
-        if rank == 0:
-            print(f'please check proc*_wavefield_discontinuity_faces in {param["SPECFEM_DB"]}!')
-        comm.Abort(1)
-    
-    # check if npts is divisible by NGLL^2
-    if npts % (NGLL * NGLL) != 0:
-        if rank == 0:
-            print(f'Error: total no. of points {npts} is not divisible by {NGLL*NGLL}!')
-        comm.Abort(1)
-
-    # load everything into a coordinate system 
-    nfaces = npts // (NGLL * NGLL)
-    cords = np.zeros((nfaces,NGLL,NGLL,3),dtype=float) # x,y,z,nx,ny,nz
-    norms = np.zeros((nfaces,NGLL,NGLL,3),dtype=float)
-    iface=0
-    for f in filenames:
-        if os.path.getsize(f) == 0:
-            continue
-        # load data
-        data = np.loadtxt(f,ndmin=2)
-
-        # convert to spherical coordinates
-        r,stla,stlo = cart2sph(data[:,0],data[:,1],data[:,2])
-        stel = -6371000 + r 
-
-        # store
-        npts = len(r)
-        nfaces1 = npts // (NGLL * NGLL)
-        iface2 = iface + nfaces1
-        cords[iface:iface2,:,0] = data[:,0].reshape((nfaces1,NGLL,NGLL))
-        cords[iface:iface2,:,1] = data[:,1].reshape((nfaces1,NGLL,NGLL))
-        cords[iface:iface2,:,2] = data[:,2].reshape((nfaces1,NGLL,NGLL))
-        norms[iface:iface2,:,0] = data[:,3].reshape((nfaces1,NGLL,NGLL))
-        norms[iface:iface2,:,1] = data[:,4].reshape((nfaces1,NGLL,NGLL))
-        norms[iface:iface2,:,2] = data[:,5].reshape((nfaces1,NGLL,NGLL))
-        iface = iface2
+    # The input order defines the same global iface numbers as AxiSEM.
+    blocks, face_sources = _cube2sph_faces(param['SPECFEM_DB'])
+    nfaces = len(face_sources)
+    points = np.concatenate([block for _, block in blocks], axis=0)
+    cords = points[:, :3].reshape(nfaces, NGLL, NGLL, 3)
+    norms = points[:, 3:].reshape(nfaces, NGLL, NGLL, 3)
 
     # allocate tasks
     startid,endid = allocate_task(nfaces,nprocs,rank)
@@ -402,6 +644,8 @@ def equivalent_force_cube2sph(param:dict):
     db = AxiBasicDB()
     db.read_basic(param['AXISEM_DIR'] + "/MZZ/Data/axisem_output.nc4")
     db.set_iodata(param['AXISEM_DIR'])
+    if db._boundary_mode:
+        _validate_boundary_faces(db, blocks)
     t0 = np.arange(db.nt) * db.dtsamp + db.t0
     t1 = np.arange(param['nt']) * param['dt'] + param['t0']
     nt1 = len(t1)
@@ -417,11 +661,23 @@ def equivalent_force_cube2sph(param:dict):
     offset_f = nfaces_cum[rank] * NGLL * NGLL * 3
     offset_mt = nfaces_cum[rank] * NGLL * NGLL * 6
     if only_eq_force:
-        offset = offset * 2 # for equivalent force only, no moment tensor
+        offset_f *= 2
 
     # compute equivalent force on each face
     fmax = 1.0 / db.dominant_T0
     for iface in range(startid,endid+1):
+        local_face = iface - startid
+        if db._boundary_mode:
+            face_normals = norms[iface].reshape(NGLL2, 3)
+            if db.face_phase[iface] == 0:
+                face_stress = db.syn_surface_derived_fields(
+                    iface, cmtfile=param['AXISEM_DIR'] + '/CMTSOLUTION', print_output=False)
+            else:
+                face_displacement = db.syn_surface_derived_fields(
+                    iface, cmtfile=param['AXISEM_DIR'] + '/CMTSOLUTION', print_output=False)
+                face_chi = db.syn_surface_wavefield(
+                    iface, cmtfile=param['AXISEM_DIR'] + '/CMTSOLUTION', print_output=False)
+                face_moment = _fluid_surface_moment(db, iface, face_normals, face_displacement)
         #print(f"compute equivalent force for face {iface+1} of {nfaces} in proc {rank} ...")
         for i in range(NGLL):
             for j in range(NGLL):
@@ -432,40 +688,43 @@ def equivalent_force_cube2sph(param:dict):
                 stel = -6371000 + r 
 
                 # get stress 
-                sig_xyz = db.syn_stress(stla,stlo,stel,param['AXISEM_DIR'] + '/CMTSOLUTION')
-                Tx = np.zeros((db.nt)); Ty = Tx *  1.; Tz = Tx * 1. 
+                if db._boundary_mode and db.face_phase[iface] == 0:
+                    sig_xyz = face_stress[i*NGLL+j]
+                elif not db._boundary_mode:
+                    sig_xyz = db.syn_stress(stla,stlo,stel,param['AXISEM_DIR'] + '/CMTSOLUTION')
                 nx = norms[iface,i,j,0]; ny = norms[iface,i,j,1]; nz = norms[iface,i,j,2]
-                Tx = sig_xyz[0,:] * nx + sig_xyz[5,:] * ny + sig_xyz[4,:] * nz 
-                Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz 
-                Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz 
-
-                Tx,_ = resample_axisem(t0,Tx,t1,
-                                       deriv_order=0,
-                                      fmax=fmax)
-                Ty,_ = resample_axisem(t0,Ty,t1,
-                                       deriv_order=0,
-                                      fmax=fmax)
-                Tz,_ = resample_axisem(t0,Tz,t1,
-                                       deriv_order=0,
-                                      fmax=fmax)
-                stf[iface,i,j,0,:] = - Tx 
-                stf[iface,i,j,1,:] = - Ty
-                stf[iface,i,j,2,:] = - Tz
+                if db._boundary_mode and db.face_phase[iface] == 1:
+                    _, ddchi = resample_axisem(t0,face_chi[i*NGLL+j],t1,
+                                               deriv_order=2,f_dom=fmax)
+                    Tx,Ty,Tz = ddchi * nx, ddchi * ny, ddchi * nz
+                else:
+                    Tx = sig_xyz[0,:] * nx + sig_xyz[5,:] * ny + sig_xyz[4,:] * nz
+                    Ty = sig_xyz[5,:] * nx + sig_xyz[1,:] * ny + sig_xyz[3,:] * nz
+                    Tz = sig_xyz[4,:] * nx + sig_xyz[3,:] * ny + sig_xyz[2,:] * nz
+                    Tx,_ = resample_axisem(t0,Tx,t1,deriv_order=0,f_dom=fmax)
+                    Ty,_ = resample_axisem(t0,Ty,t1,deriv_order=0,f_dom=fmax)
+                    Tz,_ = resample_axisem(t0,Tz,t1,deriv_order=0,f_dom=fmax)
+                stf[local_face,i,j,0,:] = - Tx
+                stf[local_face,i,j,1,:] = - Ty
+                stf[local_face,i,j,2,:] = - Tz
 
                 # get equivalent mt
                 norm_xyz = np.array(norms[iface,i,j,:],dtype=float) 
-                mt_xyz = db.syn_eq_moment(
-                    stla,stlo,stel,
-                    norm_xyz,
-                    param['AXISEM_DIR'] + '/CMTSOLUTION'
-                )
+                if db._boundary_mode and db.face_phase[iface] == 1:
+                    mt_xyz = face_moment[i*NGLL+j]
+                else:
+                    mt_xyz = db.syn_eq_moment(
+                        stla,stlo,stel,
+                        norm_xyz,
+                        param['AXISEM_DIR'] + '/CMTSOLUTION'
+                    )
 
                 # save mt 
                 for k in range(6):
                     out,_ = resample_axisem(t0,mt_xyz[k,:],t1,
                                            deriv_order=0,
-                                          fmax=fmax)
-                    stf_mt[iface,i,j,k,:] = out 
+                                          f_dom=fmax)
+                    stf_mt[local_face,i,j,k,:] = out
 
     # now we change to stf_mt to equivalent force if required
     if only_eq_force:
@@ -500,11 +759,13 @@ def equivalent_force_cube2sph(param:dict):
                         for idim in range(3):
                             force = [0,0,0]
                             force[idim] = 1.
-                            id1 = offset_f[rank] + idx 
+                            id1 = offset_f + idx
                             stf_file = "%s/force_stf_%d.bin"%(param['OUTPUT_DIR'],id1)
+                            r,lat,lon = cart2sph(*cords[startid + iface,i,j,:])
+                            location = (lon,lat,(EARTH_RADIUS_M-r)/1000.0)
                             _write_force_file(
                                 f,
-                                cords[startid + iface,i,j,:],
+                                location,
                                 force,
                                 stf_file,
                                 stf[iface,i,j,idim,:]
@@ -516,7 +777,7 @@ def equivalent_force_cube2sph(param:dict):
                                 stf_file = "%s/force_stf_eq_%d.bin"%(param['OUTPUT_DIR'],id1)
                                 _write_force_file(
                                     f,
-                                    cords[startid + iface,i,j,:],
+                                    location,
                                     force,
                                     stf_file,
                                     stf1[iface,i,j,idim,:]
@@ -537,14 +798,16 @@ def equivalent_force_cube2sph(param:dict):
                 for i in range(NGLL):
                     for j in range(NGLL):
                         for idim in range(6):
-                            id1 = offset_mt[rank] + idx 
+                            id1 = offset_mt + idx
                             if id1 == 0:
                                 f.write("PDE  1999 01 01 00 00 00.00  67000 67000 -25000 4.2 4.2 CPML_test\n")
                             mt = np.zeros((6,),dtype=float)
                             mt[idim] = 1.0
+                            r,lat,lon = cart2sph(*cords[startid + iface,i,j,:])
+                            location = (lon,lat,(EARTH_RADIUS_M-r)/1000.0)
                             _write_mt_file(
                                 f,
-                                cords[startid + iface,i,j,:],
+                                location,
                                 mt,
                                 "%s/mt_stf_%d.bin"%(param['OUTPUT_DIR'],id1),
                                 stf_mt[iface,i,j,idim,:]
@@ -554,8 +817,9 @@ def equivalent_force_cube2sph(param:dict):
         
         # synchronize
         comm.Barrier()
+    db.close()
                         
-def coupling_cart_stacey(param:dict):
+def coupling_cart_stacey(param: dict[str, Any]) -> None:
     """
     stacey coupling in cartesian system
     
@@ -563,16 +827,31 @@ def coupling_cart_stacey(param:dict):
     :type param: dict
     """
 
-    # find how many procs used in specfem
-    filenames = os.listdir(param['SPECFEM_DB'])
-    ntasks = 0
-    for f in filenames:
-        if '_normal.txt' in f:
-            ntasks += 1
-    if ntasks == 0:
-        if rank == 0:
-            print(f'please check proc*_normal.txt in {param["SPECFEM_DB"]}!')
-        comm.Abort(1)
+    # Use actual processor numbers so gaps and empty boundary files are valid.
+    files = [(int(match.group(1)),path)
+             for path in Path(param['SPECFEM_DB']).glob('proc*_normal.txt')
+             if (match := re.fullmatch(r'proc(\d+)_normal\.txt', path.name))]
+    files.sort()
+    if not files:
+        raise FileNotFoundError(f'No Cartesian boundary files in {param["SPECFEM_DB"]}')
+    ntasks = len(files)
+    boundary_mode = (Path(param['AXISEM_DIR']) / 'MZZ/Data/boundary_wavefields.nc4').is_file()
+    first_iface_by_proc = {}
+    if boundary_mode:
+        nfaces = 0
+        for proc,path in files:
+            with path.open() as stream:
+                next(stream,None)
+                npoints = sum(bool(line.strip()) for line in stream)
+            if npoints % NGLL2:
+                raise ValueError(f'{path}: expected 25 ordered points per face')
+            first_iface_by_proc[proc] = nfaces
+            nfaces += npoints // NGLL2
+
+        db = AxiBasicDB()
+        db.read_basic(str(Path(param['AXISEM_DIR']) / 'MZZ/Data/axisem_output.nc4'))
+        if nfaces != len(db.face_phase):
+            raise ValueError('Cartesian processor face counts differ from AxiSEM boundary faces')
 
     # mpi 
     comm = MPI.COMM_WORLD
@@ -585,15 +864,19 @@ def coupling_cart_stacey(param:dict):
     # time window 
     t1 = np.arange(param['nt']) * param['dt'] + param['t0']
     for i in range(startid,endid+1):
-        args = (i,
+        proc = files[i][0]
+        args = (proc,
                 param['AXISEM_DIR'],
                 param['SPECFEM_DB'],
                 param['OUTPUT_DIR'],
                 t1,
                 param['UTM_ZONE'])
-        get_field_proc_cart(args)
+        if boundary_mode:
+            get_field_proc_cart_boundary(args + (first_iface_by_proc[proc],))
+        else:
+            get_field_proc_cart(args)
 
-def coupling_cube2sph(param:dict):
+def coupling_cube2sph(param: dict[str, Any]) -> None:
     """
     cube to spherical coupling
     
@@ -601,16 +884,25 @@ def coupling_cube2sph(param:dict):
     :type param: dict
     """
 
-    # find how many procs used in specfem
-    filenames = os.listdir(param['SPECFEM_DB'])
-    ntasks = 0
-    for f in filenames:
-        if 'wavefield_discontinuity_points' in f:
-            ntasks += 1
-    if ntasks == 0:
-        if rank == 0:
-            print(f'please check proc*_wavefield_discontinuity_points in {param["SPECFEM_DB"]}!')
-        comm.Abort(1)
+    # SPECFEM processor numbers also determine the global boundary face order.
+    point_files = sorted(Path(param['SPECFEM_DB']).glob('proc*_wavefield_discontinuity_points'))
+    proc_ids = [int(match.group(1)) for path in point_files
+                if (match := re.fullmatch(r'proc(\d+)_wavefield_discontinuity_points', path.name))]
+    if not proc_ids:
+        raise FileNotFoundError(f'No cube2sph point files in {param["SPECFEM_DB"]}')
+    ntasks = len(proc_ids)
+
+    boundary_file = Path(param['AXISEM_DIR']) / 'MZZ/Data/boundary_wavefields.nc4'
+    face_by_proc = {}
+    if boundary_file.is_file():
+        blocks, sources = _cube2sph_faces(param['SPECFEM_DB'])
+        db = AxiBasicDB()
+        db.read_basic(str(boundary_file))
+        _validate_boundary_faces(db, blocks)
+        for proc, points in blocks:
+            face_by_proc[proc] = ([], points)
+        for iface, (proc, _) in enumerate(sources):
+            face_by_proc[proc][0].append(iface)
 
     # mpi 
     comm = MPI.COMM_WORLD
@@ -623,11 +915,18 @@ def coupling_cube2sph(param:dict):
     # time window 
     t1 = np.arange(param['nt']) * param['dt'] + param['t0']
     for i in range(startid,endid+1):
-        args = (i,
+        proc = proc_ids[i]
+        args = (proc,
                 param['AXISEM_DIR'],
                 param['SPECFEM_DB'],
                 param['OUTPUT_DIR'],
                 t1,
                 param['DOWN_SAMPLING'])
 
-        get_wavefield_sph(args)
+        if face_by_proc:
+            if proc not in face_by_proc:
+                raise ValueError(f'No boundary face file for SPECFEM processor {proc}')
+            args += face_by_proc[proc] + (proc_ids[0],)
+            get_wavefield_sph_boundary(args)
+        else:
+            get_wavefield_sph(args)

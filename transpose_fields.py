@@ -1,207 +1,156 @@
-import numpy as np 
-import h5py 
-from tqdm import tqdm 
-import sys 
-from mpi4py import MPI
+"""Transpose AxiSEM wavefields into float32 binary files."""
+
 import os
+from pathlib import Path
 import subprocess
+import sys
 
-def write_trans_data_dof(infile:str,dsetstr:str,out_dir:str, sizeGB:float=5.0):
-    """
-    Transpose data from (nt,npts) to (npts,nt) and write to memmap file
+import h5py
+from mpi4py import MPI
+import numpy as np
+from tqdm import tqdm
 
-    Parameters
-    -------------------
-    infile: str
-        input file path
-    dsetstr: str
-        dataset name under Snapshots/
-    out_dir: str
-        output directory
-    sizeGB: float
-        buffer size in GB for each read/write operation
-    --------------------------- 
-    """
-    file_r = h5py.File(infile,"r")
-    dset1 = file_r['Snapshots/' + dsetstr]
-    nt,npts = dset1.shape
-
-    # create an memmap file
-    dset2 = np.memmap(out_dir + '/' + dsetstr + '.bin',dtype='f4',mode='w+',shape=(npts,nt))
-
-    # allocate buffer to reduce io time
-    npts_one = int((sizeGB * 1024**3) / (nt*4))
-    for i in tqdm(range(0,npts,npts_one)):
-        ntasks = 0
-        if i + npts_one <=npts:
-            ntasks = npts_one 
-        else:
-            ntasks = npts - i 
-
-        istart = i
-        iend = i + ntasks
-        n = iend - istart
-        if n<=0 : n = 0
-
-        # alloc space
-        mydata = np.zeros((nt,n),dtype='f4')
-
-        # read data from dset1 
-        mydata = dset1[:,istart:istart+n] * np.float32(1.)
-        mydata = np.transpose(mydata)
-
-        # write to dset2
-        dset2[istart:istart+n,:] = mydata 
-
-        # flush to disk
-        dset2.flush()
-
-    # close memmap
+SOURCE_DIRS = ("MZZ", "MXZ_MYZ", "MXY_MXX_M_MYY", "MXX_P_MYY", "PX", "PY", "PZ")
+STANDARD_FIELDS = ("disp_s", "disp_p", "disp_z")
+BOUNDARY_FIELDS = ("disp_s", "disp_p", "disp_z", "chi")
 
 
-def write_trans_data_elem(infile:str,dsetstr:str,out_dir:str, sizeGB:float=5.0):
-    """
-    Transpose data from (nt,npts) to (nspec,ngll,ngll,nt) and write to memmap file
-    
-    Parameters
-    -------------------
-    infile: str
-        input file path
-    dsetstr: str
-        dataset name under Snapshots/
-    out_dir: str
-        output directory    
-    sizeGB: float
-        buffer size in GB for each read/write operation 
-    ---------------------------
-    """
-    file_r = h5py.File(infile,"r")
-    dset1 = file_r['Snapshots/' + dsetstr]
-    nt,npts = dset1.shape
+def write_trans_data_dof(infile: Path, field: str, out_dir: Path, size_gb: float) -> None:
+    """Transpose Snapshots/(time, point) to (point, time)."""
+    with h5py.File(infile, "r") as source:
+        values = source[f"Snapshots/{field}"]
+        nt, npts = values.shape
+        points_per_block = max(1, int(size_gb * 1024**3 / (2 * nt * np.dtype("f4").itemsize)))
+        output = np.memmap(out_dir / f"{field}.bin", dtype="f4", mode="w+", shape=(npts, nt))
+        try:
+            for first in tqdm(range(0, npts, points_per_block), desc=str(infile.name) + "/" + field):
+                last = min(first + points_per_block, npts)
+                output[first:last] = np.asarray(values[:, first:last], dtype="f4").T
+            output.flush()
+        finally:
+            del output
 
-    # read ibool 
-    ngll = len(file_r['Mesh/npol'])
-    nspec = len(file_r['Mesh/elements'])
-    ibool = file_r['Mesh/sem_mesh'][:]
-    idx = np.arange(0,ngll,1)
-    ngll_out = len(idx)
 
-    # create an memmap file
-    dset2 = np.memmap(out_dir + '/' + dsetstr + '.bin',dtype='f4',mode='w+',shape=(nspec,ngll_out,ngll_out,nt))
+def write_trans_data_boundary(infile: Path, field: str, out_dir: Path, size_gb: float) -> None:
+    """Transpose (time, unique_element, i, j) to (unique_element, i, j, time)."""
+    with h5py.File(infile, "r") as source:
+        values = source[field]
+        nt, nelem, ni, nj = values.shape
+        elements_per_block = max(
+            1, int(size_gb * 1024**3 / (2 * nt * ni * nj * np.dtype("f4").itemsize))
+        )
+        output = np.memmap(out_dir / f"{field}.bin", dtype="f4", mode="w+", shape=(nelem, ni, nj, nt))
+        try:
+            for first in tqdm(range(0, nelem, elements_per_block), desc=str(infile.name) + "/" + field):
+                last = min(first + elements_per_block, nelem)
+                block = np.asarray(values[:, first:last, :, :], dtype="f4")
+                output[first:last] = np.moveaxis(block, 0, -1)
+            output.flush()
+        finally:
+            del output
 
-    # allocate buffer to reduce io time
-    npts_one = int((sizeGB * 1024**3) / (nt*4))
-    for i in tqdm(range(0,npts,npts_one)):
-        ntasks = 0
-        if i + npts_one <=npts:
-            ntasks = npts_one 
-        else:
-            ntasks = npts - i 
 
-        istart = i
-        iend = i + ntasks
-        n = iend - istart
-        if n<=0 : n = 0
+def find_inputs(path: Path):
+    """Use boundary data when available in each Data directory."""
+    if path.is_file():
+        if path.name in ("boundary_wavefields.nc4", "axisem_output.nc4"):
+            yield path
+        return
+    data_dirs = [path, path / "Data"]
+    data_dirs.extend(path / source / "Data" for source in SOURCE_DIRS)
+    for data_dir in data_dirs:
+        for name in ("boundary_wavefields.nc4", "axisem_output.nc4"):
+            candidate = data_dir / name
+            if candidate.is_file():
+                yield candidate
+                break
 
-        # alloc space
-        mydata = np.zeros((nt,n),dtype='f4')
 
-        # read data from dset1 
-        mydata = dset1[:,istart:istart+n] * np.float32(1.)
-        mydata = np.transpose(mydata)
+def repack_after_removing_fields(infile: Path, fields: set[str], boundary: bool) -> None:
+    prefix = "" if boundary else "Snapshots/"
+    with h5py.File(infile, "a") as source:
+        for field in fields:
+            print(f"Deleting {prefix}{field} from {infile}", flush=True)
+            del source[prefix + field]
+    backup = infile.with_name(infile.name + ".bak")
+    os.replace(infile, backup)
+    try:
+        subprocess.run(["h5repack", str(backup), str(infile)], check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        if infile.exists():
+            infile.unlink()
+        os.replace(backup, infile)
+        raise
+    backup.unlink()
 
-        # write to dset2
-        mask = (ibool >= istart) & (ibool < istart + n) 
-        dset2[mask] = mydata[ibool[mask] - istart]
 
-        # flush to disk
-        dset2.flush()
+def main() -> None:
+    if len(sys.argv) < 3:
+        print("Usage: transpose_fields.py sizeGB_per_rank direc1 [direc2 ...]", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        size_gb_per_rank = float(sys.argv[1])
+    except ValueError:
+        print("sizeGB_per_rank must be a positive number", file=sys.stderr)
+        raise SystemExit(1)
+    if size_gb_per_rank <= 0:
+        print("sizeGB_per_rank must be a positive number", file=sys.stderr)
+        raise SystemExit(1)
 
-    # close memmap
-
-def main():
-    if len(sys.argv) < 4:
-        print("Usage:./this to_dof sizeGB_per_rank direc1 [direc2]  ...")
-        exit(1)
-    #
-    ndirec = len(sys.argv) - 3
-    to_dof = int(sys.argv[1]) 
-    sizeGB_per_rank = float(sys.argv[2])
-
-    # initialize MPI
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
-
-    # loop over directories
-    work_list = []
-    for i in range(ndirec):
-        source_direcs = ['MZZ','MXZ_MYZ','MXY_MXX_M_MYY','MXX_P_MYY','PX','PZ']
-        direc = sys.argv[i + 3]
-        for s in source_direcs:
-            infile = direc + "/" + s + "/Data/axisem_output.nc4"
-
-            # check if file exist
-            if not os.path.isfile(infile):
+    jobs: list[tuple[Path, str, bool]] = []
+    seen: set[Path] = set()
+    for path in sys.argv[2:]:
+        directory = Path(path)
+        for infile in find_inputs(directory):
+            resolved = infile.resolve()
+            if resolved in seen:
                 continue
-
-            file_r = h5py.File(infile,"r")
-            for dsetstr in ["disp_s","disp_p","disp_z"]:
-                dataname = "Snapshots/" + dsetstr
-                if dataname not in file_r.keys():
+            seen.add(resolved)
+            boundary = infile.name == "boundary_wavefields.nc4"
+            fields = BOUNDARY_FIELDS if boundary else STANDARD_FIELDS
+            with h5py.File(infile, "r") as source:
+                group = source if boundary else source.get("Snapshots")
+                if group is None:
                     continue
-                # append to work list
-                work_list.append( (infile,dsetstr,direc + "/" + s + "/Data") )
-            file_r.close()
+                for field in fields:
+                    if field in group:
+                        jobs.append((infile, field, boundary))
 
-    # allocate work to each rank
-    njobs = len(work_list)
-    for i in range(rank, njobs, size):
-        infile,dsetstr,out_dir = work_list[i]
-        print(f"Rank {rank} processing file {infile} dataset {dsetstr} ...")
-        if to_dof == 1:
-            write_trans_data_dof(infile,dsetstr,out_dir, sizeGB=sizeGB_per_rank)
-        else:
-            write_trans_data_elem(infile,dsetstr,out_dir, sizeGB=sizeGB_per_rank)
+    comm = MPI.COMM_WORLD
+    rank, size = comm.Get_rank(), comm.Get_size()
+    failures = []
+    for index in range(rank, len(jobs), size):
+        infile, field, boundary = jobs[index]
+        print(f"Rank {rank}: transposing {infile}/{field}", flush=True)
+        try:
+            if boundary:
+                write_trans_data_boundary(infile, field, infile.parent, size_gb_per_rank)
+            else:
+                write_trans_data_dof(infile, field, infile.parent, size_gb_per_rank)
+        except Exception as exc:
+            failures.append(f"{infile}/{field}: {exc}")
+    all_failures = comm.allgather(failures)
+    if any(all_failures):
+        for rank_failures in all_failures:
+            for failure in rank_failures:
+                print(f"Transpose failed: {failure}", flush=True)
+        raise SystemExit(1)
 
-
-    # sync all ranks
-    comm.Barrier()
-
-    # delete all variables
+    repack_failure = None
     if rank == 0:
-        for i in range(njobs):
-            infile,dsetstr,_ = work_list[i]
-            print(f"deleting variables... Snapshots/{dsetstr} in {infile}")
+        try:
+            for infile in sorted({infile for infile, _, _ in jobs}):
+                repack_after_removing_fields(
+                    infile,
+                    {field for path, field, _ in jobs if path == infile},
+                    infile.name == "boundary_wavefields.nc4",
+                )
+        except Exception as exc:
+            repack_failure = str(exc)
+    repack_failure = comm.bcast(repack_failure, root=0)
+    if repack_failure:
+        raise SystemExit(f"Repack failed: {repack_failure}")
 
-            file_r = h5py.File(infile,"a")
-            del file_r['Snapshots/' + dsetstr]
-            file_r.close()
-
-        # find unique filenames
-        filenames = set()
-        for i in range(njobs):
-            infile,_,_ = work_list[i]
-            filenames.add(infile)
-
-        # loop over filenames to repack
-        for infile in filenames:
-            print(f"repacking file {infile} ...")
-            newname = infile + '.bak'
-            os.rename(infile,newname)
-            try:
-                subprocess.run(['h5repack',newname,infile],check=True)
-            except (subprocess.CalledProcessError,FileNotFoundError) as e:
-                print(f"h5repack failed for {infile}: {e}, restoring original file")
-                if os.path.isfile(infile):
-                    os.remove(infile)
-                os.rename(newname,infile)
-                continue
-            os.remove(newname)
-
-    comm.Barrier()
-    MPI.Finalize()
 
 if __name__ == "__main__":
     main()
-

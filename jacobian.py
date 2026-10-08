@@ -184,7 +184,7 @@ def moment_to_force(mt:np.ndarray, jaco:np.ndarray,dxi_dr:np.ndarray):
     [-2.6666666666666677e-01,  9.5046014413898927e-01,  1.8421478334521120e-16, -9.5046014413898927e-01,  2.6666666666677e-01],
     [ 1.4101641779424268e-01, -4.1582631306080770e-01,  9.5046014413898883e-01,  4.9363805224537042e-16, -6.7565024887242398e-01],
     [-5.0000000000000003e-02,  1.4101641779424262e-01, -2.6666666666666661e-01,  6.7565024887242375e-01,  5.0000000000000000e-01]
-    ], dtype=float)
+    ], dtype=np.float64)
 
     # voigt to tensor mapping
     voigt = np.array([[0,5,4],[5,1,3],[4,3,2]],dtype=np.int64)
@@ -208,6 +208,6 @@ def moment_to_force(mt:np.ndarray, jaco:np.ndarray,dxi_dr:np.ndarray):
                             c2 += mt[ifa,iz,a,idx,:] * hprime_wgllT[ix,a] *  \
                                 jaco[ifa,iz,a] * dxi_dr[ifa,iz,a,1,q]
                 
-                    f_eq[ifa,iz,ix,p,:] = c1 / (wgll[iz] * jac) + c2 / (wgll[ix] * jac)
+                        f_eq[ifa,iz,ix,p,:] += c1 / (wgll[iz] * jac) + c2 / (wgll[ix] * jac)
     
-    return f_eq 
+    return f_eq

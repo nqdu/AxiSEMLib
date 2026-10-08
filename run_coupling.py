@@ -131,8 +131,8 @@ def main():
         from driver import coupling_cube2sph
         coupling_cube2sph(param)
     elif coupling_method == 'ef' and system == 'cube2sph':
-        from driver import coupling_cart_equivforce
-        coupling_cart_equivforce(param)
+        from driver import equivalent_force_cube2sph
+        equivalent_force_cube2sph(param)
     else:
         if rank ==0 :
             print(f"[X] Coupling method '{coupling_method}' with system '{system}' not implemented.")

@@ -11,4 +11,4 @@ module load fwi/gcc
 # solver dir
 axisem_list=.. # like /path/to/axisem/SOLVER/ak135.*
 size_gb_per_rank=2.0  # size in GB per rank for buffer
-mpirun -np 8 python ./transpose_fields.py 1 $size_gb_per_rank $axisem_list
+mpirun -np 8 python ./transpose_fields.py "$size_gb_per_rank" "$axisem_list"
