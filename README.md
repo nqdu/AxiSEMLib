@@ -66,17 +66,6 @@ make install
 ```
 
 ## Prepare AxiSEM Mesh
-- Go to directory `axisem` and change compiler options in `make_axisem.macros`. Remember to set `USE_NETCDF = true`, set `NETCDF_PATH`.
-
-- Go to `MESHER/`, set parameters including `DOMINANT_PERIOD` and number of slices in `inparam_mesh`. Please make sure this dominant period is slightly shorter than the minimum period used in SEM(you can find it in `SPECFEM`'s `output_generate_databases.txt`) If you want to use a smoothed version of ak135/prem model, you can run scripts under `smooth_model/main.py`, and set the parameters like:
-```bash
-BACKGROUND_MODEL external
-EXT_MODEL ak135.smooth.bm
-```
-
-- Run mesh generation `./submit.csh` and `./movemesh.csh mesh_name`. Then the mesh files will be moved to `SOLVER/MESHES` as the `mesh_name` you set.
-
-## Prepare AxiSEM Mesh
 
 1.  **Configure Macros:** Navigate to the `axisem` directory and update the compiler options in `make_axisem.macros`.
     * Ensure `USE_NETCDF = true`.
@@ -156,6 +145,34 @@ Prepare your `CMTSOLUTION` and `STATIONS` files. You can refer to the examples i
 
 Run the solver from `axisem/SOLVER` after preparing the mesh and the input files described above. If `SAVE_BDRY_FACES` is enabled, place `boundary_faces.dat` in this directory first. `submit.csh` builds the solver, creates a new run directory, copies the inputs, and starts the simulation. The run directory name must not already exist.
 
+Use `surface_merge.py` to construct `axisem/SOLVER/boundary_faces.dat` from
+SPECFEM's `DATABASES_MPI` files:
+
+```bash
+python surface_merge.py cube2sph SPECFEM_DB axisem/SOLVER/boundary_faces.dat
+python surface_merge.py cart SPECFEM_DB axisem/SOLVER/boundary_faces.dat --utm-zone 10
+```
+
+For `cube2sph`, the script reads `proc??????_wavefield_discontinuity_faces`
+with either `x y z` or `x y z nx ny nz` rows, and converts the Earth-centered
+Cartesian `x y z` coordinates to longitude,
+geocentric latitude, and depth below a 6371 km Earth. For `cart`, it reads
+`proc??????_normal.txt`, inverts the specified UTM projection to geographic
+longitude and latitude, converts latitude to geocentric, and sets depth from
+the file's elevation `z` in meters. Cartesian rows contain
+`x y z nx ny nz`; any normal columns are omitted from the output. The script skips the first
+header line of each `proc*_normal.txt` file.
+The three-column `cube2sph` form is sufficient to build the AxiSEM input;
+the coupling driver still needs face normals to calculate traction.
+
+Each consecutive 25 input rows becomes one face. Files are merged by ascending
+numeric processor number, and `iface` is the zero-based cumulative face count;
+no coordinate lookup determines it. Empty processor files add no faces. The
+script rejects files whose data rows are not a multiple of 25. Its
+`merge_surfaces(...)` return value maps each `iface` to
+`(processor_number, local_face_index)`. `submit.csh` copies
+`boundary_faces.dat` into the run directory when `SAVE_BDRY_FACES` is enabled.
+
 For one run on the local machine:
 
 ```bash
@@ -208,33 +225,6 @@ prints and returns XYZ stress `(25, 6, nt)` for a solid face or XYZ acoustic
 displacement `(25, 3, nt)` for a fluid face. Solid displacement coordinates
 can be selected with `comp='enz'` (default), `'xyz'`, or `'spz'`.
 
-Use `surface_merge.py` to construct `axisem/SOLVER/boundary_faces.dat` from
-SPECFEM's `DATABASES_MPI` files:
-
-```bash
-python surface_merge.py cube2sph SPECFEM_DB axisem/SOLVER/boundary_faces.dat
-python surface_merge.py cart SPECFEM_DB axisem/SOLVER/boundary_faces.dat --utm-zone 10
-```
-
-For `cube2sph`, the script reads `proc??????_wavefield_discontinuity_faces`
-with either `x y z` or `x y z nx ny nz` rows, and converts the Earth-centered
-Cartesian `x y z` coordinates to longitude,
-geocentric latitude, and depth below a 6371 km Earth. For `cart`, it reads
-`proc??????_normal.txt`, inverts the specified UTM projection to geographic
-longitude and latitude, converts latitude to geocentric, and sets depth from
-the file's elevation `z` in meters. Cartesian rows contain
-`x y z nx ny nz`; any normal columns are omitted from the output. The script skips the first
-header line of each `proc*_normal.txt` file.
-The three-column `cube2sph` form is sufficient to build the AxiSEM input;
-the coupling driver still needs face normals to calculate traction.
-
-Each consecutive 25 input rows becomes one face. Files are merged by ascending
-numeric processor number, and `iface` is the zero-based cumulative face count;
-no coordinate lookup determines it. Empty processor files add no faces. The
-script rejects files whose data rows are not a multiple of 25. Its
-`merge_surfaces(...)` return value maps each `iface` to
-`(processor_number, local_face_index)`. `submit.csh` copies
-`boundary_faces.dat` into the run directory when `SAVE_BDRY_FACES` is enabled.
 When `boundary_wavefields.nc4` is present, `driver.py` selects separate
 boundary workers for Cartesian and `cube2sph` wavefield coupling. The
 `cube2sph` worker maps SPECFEM's unique points back to the ascending face
