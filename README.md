@@ -16,12 +16,8 @@ newer is required. From the AxiSEMLib checkout:
 python -m pip install -e .
 ```
 
-For MPI coupling, transposition, and the optional reciprocity tools, install
-all extras in an environment with MPI available:
-
-```bash
-python -m pip install -e ".[all]"
-```
+The default installation includes coupling, transposition, and reciprocity
+routines. Use an environment with an MPI library available.
 
 ## Commands
 

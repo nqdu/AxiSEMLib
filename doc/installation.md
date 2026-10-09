@@ -32,15 +32,10 @@ With these sibling checkouts, the solver is at `../axisem` relative to the
 AxiSEMLib repository. Use the full solver path in configuration files when
 running from another directory.
 
-For MPI coupling and wavefield transposition, install their optional
-dependencies in an environment whose MPI library matches the job launcher:
-
-```bash
-python -m pip install -e ".[coupling,transpose]"
-```
-
-Install `.[all]` if you also need the optional reciprocity plotting tools.
-Check the commands with `axisemlib --help` and `axisemlib-prepare --help`.
+The default installation includes dependencies for MPI coupling, wavefield
+transposition, and reciprocity plotting. Use an environment whose MPI library
+matches the job launcher. Check the commands with `axisemlib --help` and
+`axisemlib-prepare --help`.
 Wavefield transposition also needs `h5repack` on `PATH`.
 
 ## Build these docs

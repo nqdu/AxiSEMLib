@@ -16,14 +16,14 @@ dependencies = [
     "numba>=0.58",
     "h5py>=3.8",
     "pyproj>=3.4",
+    "mpi4py>=3.1",
+    "PyYAML>=6",
+    "tqdm>=4.64",
+    "matplotlib>=3.5",
 ]
 
 [project.optional-dependencies]
-coupling = ["mpi4py>=3.1", "PyYAML>=6"]
-transpose = ["mpi4py>=3.1", "tqdm>=4.64"]
-reciprocity = ["matplotlib>=3.5"]
 docs = ["sphinx>=7", "myst-parser>=2"]
-all = ["mpi4py>=3.1", "PyYAML>=6", "tqdm>=4.64", "matplotlib>=3.5"]
 
 [project.scripts]
 axisemlib = "axisemlib.cli:main"

@@ -1,15 +1,12 @@
 # Command-line reference
 
 Follow the [installation guide](installation.md) to clone the solver and
-install the package. The base installation
-includes NumPy, SciPy, Numba, h5py, and pyproj. It contains no compiled Python
-extension; Numba compiles numerical kernels when they are first called.
-
-MPI coupling also needs `mpi4py` and PyYAML. Wavefield transposition needs
-`mpi4py` and tqdm. Install both with
-`python -m pip install -e ".[coupling,transpose]"` in an environment whose MPI library matches the one
-used to launch the jobs. `.[all]` also installs Matplotlib for reciprocity
-plots. The AxiSEM solver itself is built from the separate axisem repository.
+install the package. The default installation includes NumPy, SciPy, Numba,
+h5py, pyproj, mpi4py, PyYAML, tqdm, and Matplotlib, covering every runtime
+module. Use an environment whose MPI library matches the job launcher. The
+package contains no compiled Python extension; Numba compiles numerical
+kernels when first called. The AxiSEM solver is built from its separate
+repository.
 
 ## `axisemlib merge`
 
