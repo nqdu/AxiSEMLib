@@ -8,9 +8,10 @@ package does not compile the AxiSEM solver or a Python extension.
 
 ## Install
 
-Clone the [AxiSEM solver](https://github.com/nqdu/axisem) and this repository
-as described in the [installation guide](doc/installation.md). Python 3.10 or
-newer is required. From the AxiSEMLib checkout:
+Follow the [installation guide](doc/installation.md) to clone the
+[AxiSEM solver](https://github.com/nqdu/axisem), run `copytemplates.sh`,
+generate a mesh, and install this package. Python 3.10 or newer is required.
+From the AxiSEMLib checkout:
 
 ```bash
 python -m pip install -e .

@@ -6,25 +6,51 @@ solver and install AxiSEMLib. The commands below assume sibling `axisem` and
 
 ## Prepare AxiSEM Mesh
 
-1.  **Configure Macros:** Navigate to the `axisem` directory and update the compiler options in `make_axisem.macros`.
+1.  **Copy the templates:** From the AxiSEMLib checkout, initialize the
+    solver's default input files before changing them:
+
+    ```bash
+    cd ../axisem
+    ./copytemplates.sh
+    cd ../AxiSEMLib
+    ```
+
+    This replaces `make_axisem.macros`, `MESHER/inparam_mesh`, and the solver
+    parameter files.
+
+2.  **Configure Macros:** Update the compiler options in
+    `../axisem/make_axisem.macros`.
     * Ensure `USE_NETCDF = true`.
     * Set the correct `NETCDF_PATH`.
 
-2.  **Configure Mesher:** Navigate to `MESHER/` and edit `inparam_mesh`.
+3.  **Configure Mesher:** Edit `../axisem/MESHER/inparam_mesh`.
     * Set `DOMINANT_PERIOD` and the number of slices.
     * **Note:** Ensure the dominant period is slightly shorter than the minimum period used in the SEM (refer to `output_generate_databases.txt` in SPECFEM).
-    * **Optional:** If you have a smoothed **ak135/prem** model, configure it as an external model:
+    * The copied template selects `BACKGROUND_MODEL external` and
+      `EXT_MODEL ak135.smooth.bm`. Put that file in `MESHER`, or use a built-in
+      model such as `BACKGROUND_MODEL ak135`.
+    * If you have a smoothed **ak135/prem** model, configure it as an external model:
         ```bash
         BACKGROUND_MODEL external
         EXT_MODEL ak135.smooth.bm
         ```
 
-3.  **Generate Mesh:** Execute the generation and migration scripts:
+4.  **Generate Mesh:** Run the mesher:
+
     ```bash
+    cd ../axisem/MESHER
     ./submit.csh
-    ./movemesh.csh <mesh_name>
     ```
-    The mesh files will be moved to `SOLVER/MESHES/<mesh_name>`.
+
+    Wait for `OUTPUT` to report `DONE WITH MESHER`, then move the completed
+    mesh:
+
+    ```bash
+    ./movemesh.csh <mesh_name>
+    cd ../../AxiSEMLib
+    ```
+    The mesh files will be moved to `../axisem/SOLVER/MESHES/<mesh_name>`.
+    Set `MESHNAME` in `../axisem/SOLVER/inparam_basic` to `<mesh_name>`.
 
 ---
 

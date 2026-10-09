@@ -10,17 +10,45 @@ this package:
 git clone --branch AxiSEMLib https://github.com/nqdu/axisem.git
 ```
 
-The solver is a separate Fortran program. Configure its
-`make_axisem.macros`, build the mesh, and run the solver as described in the
-[solver and coupling workflow](workflow.md). AxiSEMLib's Python installation
-does not build the solver.
+Initialize the solver inputs from its templates before editing any parameter
+files. `copytemplates.sh` replaces `make_axisem.macros` and the mesher and
+solver input files:
+
+```bash
+cd axisem
+./copytemplates.sh
+```
+
+Set the compiler and NetCDF paths in `make_axisem.macros`, then configure
+`MESHER/inparam_mesh` for the required model, period, and processor count.
+The copied mesher template selects an external `ak135.smooth.bm` file. Supply
+that model in `MESHER`, or select a built-in model such as
+`BACKGROUND_MODEL ak135` before running the mesher.
+Build and run the mesh from `MESHER`:
+
+```bash
+cd MESHER
+./submit.csh
+```
+
+Wait until `OUTPUT` reports `DONE WITH MESHER`. Move the completed mesh to the
+solver, then set `MESHNAME` in `SOLVER/inparam_basic` to the same name:
+
+```bash
+./movemesh.csh my_mesh
+```
+
+The solver is a separate Fortran program. Continue with the
+[solver and coupling workflow](workflow.md) after the mesh is available.
+AxiSEMLib's Python installation does not build the solver.
 
 ## Install the Python package
 
-Clone AxiSEMLib beside the `axisem` checkout, then install it in a Python
-3.10 or newer environment:
+Return to the parent directory, clone AxiSEMLib beside the `axisem` checkout,
+then install it in a Python 3.10 or newer environment:
 
 ```bash
+cd ../..
 git clone --branch devel https://github.com/nqdu/AxiSEMLib.git
 cd AxiSEMLib
 python -m venv .venv
