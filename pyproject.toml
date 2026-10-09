@@ -31,6 +31,7 @@ axisemlib-prepare = "axisemlib.prepare_axisem_injection:main"
 
 [project.urls]
 Repository = "https://github.com/nqdu/AxiSEMLib"
+Documentation = "https://nqdu.github.io/AxiSEMLib/"
 
 [tool.setuptools.packages.find]
 include = ["axisemlib*"]

@@ -4,6 +4,8 @@ AxiSEMLib reads AxiSEM wavefields, produces receiver seismograms, and builds
 SPECFEM coupling files. Its numerical kernels use Numba; installing the Python
 package does not compile the AxiSEM solver or a Python extension.
 
+[Read the documentation](https://nqdu.github.io/AxiSEMLib/).
+
 ## Install
 
 Clone the [AxiSEM solver](https://github.com/nqdu/axisem) and this repository
