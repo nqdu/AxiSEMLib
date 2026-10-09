@@ -8,9 +8,10 @@ sibling `axisem` and `AxiSEMLib` checkouts.
 
 The [installation guide](installation.md) covers the first mesh, including
 template copying and [build macro setup](installation.md#configure-macros).
-To build another mesh, start from AxiSEM's `SOLVER` directory:
+To build another mesh, go to the AxiSEM checkout's `MESHER` directory. Run the
+following commands there:
 
-1.  **Configure Mesher:** Edit `../MESHER/inparam_mesh`.
+1.  **Configure Mesher:** Edit `inparam_mesh`.
     * Set `DOMINANT_PERIOD` and the number of slices.
     * **Note:** Ensure the dominant period is slightly shorter than the minimum period used in the SEM (refer to `output_generate_databases.txt` in SPECFEM).
     * The copied template selects `BACKGROUND_MODEL external` and
@@ -20,7 +21,7 @@ To build another mesh, start from AxiSEM's `SOLVER` directory:
       [axisemlib smooth](cli.md#axisemlib-smooth):
 
         ```bash
-        axisemlib smooth --model ak135 --output-dir ../MESHER
+        axisemlib smooth --model ak135 --output-dir .
         ```
 
       Configure the generated file as an external model:
@@ -33,7 +34,6 @@ To build another mesh, start from AxiSEM's `SOLVER` directory:
 2.  **Generate Mesh:** Run the mesher:
 
     ```bash
-    cd ../MESHER
     ./submit.csh
     ```
 
@@ -106,8 +106,9 @@ prepares the input files for one event at a time; see the
 
 ## Run AxiSEM Simulation
 
-Run the solver from `SOLVER` after preparing the mesh and the input
-files described above. If `SAVE_BDRY_FACES` is enabled, place
+Go to the AxiSEM checkout's `SOLVER` directory before preparing input files
+and running the solver. If you followed the mesh steps above, you are already
+there. If `SAVE_BDRY_FACES` is enabled, place
 `boundary_faces.dat` there first. `submit.csh` builds the solver, creates a
 new run directory, copies the inputs, and starts the simulation. The run
 directory name must not already exist.
