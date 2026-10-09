@@ -31,13 +31,19 @@ def build_parser() -> argparse.ArgumentParser:
     transpose.add_argument("size_gb_per_rank", type=float, help="Read buffer size in GiB")
     transpose.add_argument("run_dirs", type=Path, nargs="+", help="AxiSEM run directories")
 
-    model = commands.add_parser("model", help="Generate a smoothed AxiSEM model")
-    model.add_argument("--model", choices=("prem", "ak135"), default="prem")
-    model.add_argument("--sigma-km", type=float, default=5.0)
-    model.add_argument("--ngll", type=int, default=5)
-    model.add_argument("--element-size-km", type=float, default=1.0)
-    model.add_argument("--output-dir", type=Path, default=Path("."))
-    model.add_argument("--no-plot", action="store_true")
+    model_options = argparse.ArgumentParser(add_help=False)
+    model_options.add_argument("--model", choices=("prem", "ak135"), default="prem")
+    model_options.add_argument("--sigma-km", type=float, default=5.0)
+    model_options.add_argument("--ngll", type=int, default=5)
+    model_options.add_argument("--element-size-km", type=float, default=1.0)
+    model_options.add_argument("--output-dir", type=Path, default=Path("."))
+    model_options.add_argument("--no-plot", action="store_true")
+    commands.add_parser(
+        "model", parents=[model_options], help="Generate a smoothed AxiSEM model"
+    )
+    commands.add_parser(
+        "smooth", parents=[model_options], help="Generate a smoothed AxiSEM model"
+    )
 
     prepare = commands.add_parser(
         "prepare", help="Prepare one AxiSEM injection event",
@@ -84,7 +90,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
 
-    if args.command == "model":
+    if args.command in ("model", "smooth"):
         from .smooth_model import generate_model
 
         try:

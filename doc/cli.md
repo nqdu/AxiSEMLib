@@ -68,6 +68,12 @@ The default model is PREM. The command writes `<model>.smooth.bm` for
 Use `--ngll`, `--element-size-km`, or `--no-plot` to change the smoothing
 grid or outputs. The default grid spacing is 1 km.
 
+## `axisemlib smooth`
+
+`axisemlib smooth` is an alias for `axisemlib model` and accepts the same
+options. Use it to generate an external `ak135.smooth.bm` or
+`prem.smooth.bm` file before running the AxiSEM mesher.
+
 ## `axisemlib prepare`
 
 `axisemlib prepare` creates one event's `CMTSOLUTION`, `STATIONS`, and

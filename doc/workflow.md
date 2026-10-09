@@ -6,36 +6,30 @@ solver and install AxiSEMLib. The commands below assume sibling `axisem` and
 
 ## Prepare AxiSEM Mesh
 
-1.  **Copy the templates:** From the AxiSEMLib checkout, initialize the
-    solver's default input files before changing them:
+Follow the [installation guide](installation.md) to copy the solver templates,
+configure `make_axisem.macros`, and install AxiSEMLib first.
 
-    ```bash
-    cd ../axisem
-    ./copytemplates.sh
-    cd ../AxiSEMLib
-    ```
-
-    This replaces `make_axisem.macros`, `MESHER/inparam_mesh`, and the solver
-    parameter files.
-
-2.  **Configure Macros:** Update the compiler options in
-    `../axisem/make_axisem.macros`.
-    * Ensure `USE_NETCDF = true`.
-    * Set the correct `NETCDF_PATH`.
-
-3.  **Configure Mesher:** Edit `../axisem/MESHER/inparam_mesh`.
+1.  **Configure Mesher:** Edit `../axisem/MESHER/inparam_mesh`.
     * Set `DOMINANT_PERIOD` and the number of slices.
     * **Note:** Ensure the dominant period is slightly shorter than the minimum period used in the SEM (refer to `output_generate_databases.txt` in SPECFEM).
     * The copied template selects `BACKGROUND_MODEL external` and
       `EXT_MODEL ak135.smooth.bm`. Put that file in `MESHER`, or use a built-in
       model such as `BACKGROUND_MODEL ak135`.
-    * If you have a smoothed **ak135/prem** model, configure it as an external model:
+    * To generate a smoothed **ak135/PREM** model, use
+      [axisemlib smooth](cli.md#axisemlib-smooth) from the AxiSEMLib checkout:
+
+        ```bash
+        axisemlib smooth --model ak135 --output-dir ../axisem/MESHER
+        ```
+
+      Configure the generated file as an external model:
+
         ```bash
         BACKGROUND_MODEL external
         EXT_MODEL ak135.smooth.bm
         ```
 
-4.  **Generate Mesh:** Run the mesher:
+2.  **Generate Mesh:** Run the mesher:
 
     ```bash
     cd ../axisem/MESHER

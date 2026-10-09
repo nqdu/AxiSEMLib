@@ -45,13 +45,14 @@ Wavefield transposition also needs `h5repack` on `PATH`.
 
 ## Build the AxiSEM mesh
 
-Set the compiler and NetCDF paths in `../axisem/make_axisem.macros`, then
+Set `USE_NETCDF = true` and the correct `NETCDF_PATH` in
+`../axisem/make_axisem.macros`, then
 configure `../axisem/MESHER/inparam_mesh` for the model, period, and processor
 count. The copied mesher template selects an external `ak135.smooth.bm` file.
 Generate it from the AxiSEMLib checkout:
 
 ```bash
-axisemlib model --model ak135 --output-dir ../axisem/MESHER
+axisemlib smooth --model ak135 --output-dir ../axisem/MESHER
 ```
 
 You can instead select a built-in model such as `BACKGROUND_MODEL ak135`.

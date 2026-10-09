@@ -26,7 +26,7 @@ routines. Use an environment with an MPI library available.
 axisemlib merge cube2sph SPECFEM_DB ../axisem/SOLVER/boundary_faces.dat
 axisemlib seismogram AXISEM_RUN --output-dir SEISMOGRAMS
 axisemlib transpose 2.0 AXISEM_RUN
-axisemlib model --model ak135 --output-dir ../axisem/MESHER
+axisemlib smooth --model ak135 --output-dir ../axisem/MESHER
 axisemlib prepare --region-box 114 132 41 46 450 --t0-injection 1166.926174
 mpirun -n 8 axisemlib coupling param.yaml
 ```
