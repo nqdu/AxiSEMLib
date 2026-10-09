@@ -68,9 +68,9 @@ The default model is PREM. The command writes `<model>.smooth.bm` for
 Use `--ngll`, `--element-size-km`, or `--no-plot` to change the smoothing
 grid or outputs. The default grid spacing is 1 km.
 
-## Other installed commands
+## `axisemlib prepare`
 
-`axisemlib-prepare` creates one event's `CMTSOLUTION`, `STATIONS`, and
+`axisemlib prepare` creates one event's `CMTSOLUTION`, `STATIONS`, and
 parameter files; see [the preparation guide](prepare_axisem_injection.md).
 
 Use the commands above or import the Python API from `axisemlib`.

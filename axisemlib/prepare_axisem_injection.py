@@ -2,6 +2,7 @@
 
 import argparse
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -72,11 +73,8 @@ def _distance_range(event_lat: float, event_lon: float,
     return float(np.min(distances) - buffer_deg), float(np.max(distances) + buffer_deg)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add injection preparation options to a standalone or nested parser."""
     parser.add_argument(
         "--region-box", nargs=5, type=float, required=True,
         default=argparse.SUPPRESS,
@@ -106,7 +104,10 @@ def main() -> None:
                         help="Advanced parameter input")
     parser.add_argument("--output-dir", type=Path, default=Path("."),
                         help="Directory for the four prepared solver inputs")
-    args = parser.parse_args()
+
+
+def prepare_inputs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Validate arguments and write the prepared AxiSEM solver inputs."""
 
     lon_min, lon_max, lat_min, lat_max, max_depth = args.region_box
     if lon_min > lon_max or lat_min > lat_max or not -90 <= lat_min <= lat_max <= 90:
@@ -169,6 +170,15 @@ def main() -> None:
     ):
         (output / filename).write_text(contents)
     print(f"Prepared AxiSEM inputs in {output.resolve()}")
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    add_arguments(parser)
+    prepare_inputs(parser.parse_args(argv), parser)
 
 
 if __name__ == "__main__":

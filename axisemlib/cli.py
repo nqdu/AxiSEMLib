@@ -39,6 +39,15 @@ def build_parser() -> argparse.ArgumentParser:
     model.add_argument("--output-dir", type=Path, default=Path("."))
     model.add_argument("--no-plot", action="store_true")
 
+    prepare = commands.add_parser(
+        "prepare", help="Prepare one AxiSEM injection event",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    from .prepare_axisem_injection import add_arguments
+
+    add_arguments(prepare)
+    prepare.set_defaults(_prepare_parser=prepare)
+
     return parser
 
 
@@ -86,6 +95,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         except ValueError as exc:
             parser.error(str(exc))
         print(f"Wrote {external} and {profile}")
+        return 0
+
+    if args.command == "prepare":
+        from .prepare_axisem_injection import prepare_inputs
+
+        prepare_inputs(args, args._prepare_parser)
         return 0
 
     from .run_coupling import main as run_coupling

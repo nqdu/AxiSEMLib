@@ -103,11 +103,11 @@ KERNEL_RMAX         6372.
 > times; the other kernel dump selection settings do not select boundary points.
 
 ### 3. Source and Station Setup
-Prepare your `CMTSOLUTION` and `STATIONS` files. `axisemlib-prepare`
+Prepare your `CMTSOLUTION` and `STATIONS` files. `axisemlib prepare`
 prepares the input files for one event at a time; see the
 [injection preparation guide](prepare_axisem_injection.md) for all options.
 
-**Use geographic coordinates** for all latitudes (event latitude in `CMTSOLUTION`, station latitudes in `STATIONS`, and the study region passed to the command). `axisemlib-prepare` converts them from geodetic to geocentric latitudes for AxiSEM, which assumes a spherical Earth. The original files in `CMT_DIR` are left unchanged.
+**Use geographic coordinates** for all latitudes (event latitude in `CMTSOLUTION`, station latitudes in `STATIONS`, and the study region passed to the command). `axisemlib prepare` converts them from geodetic to geocentric latitudes for AxiSEM, which assumes a spherical Earth. The original files in `CMT_DIR` are left unchanged.
 
 ## Run AxiSEM Simulation
 
@@ -157,7 +157,7 @@ Local runs start in the background; check the `OUTPUT_*` files in the new run di
 To prepare one event, run from the AxiSEM `SOLVER` directory:
 
 ```bash
-axisemlib-prepare \
+axisemlib prepare \
     --region-box 114 132 41 46 450 \
     --t0-injection 1166.926174 \
     --cmtsolution CMT_DIR/CMTSOLUTION_SKS_1 \

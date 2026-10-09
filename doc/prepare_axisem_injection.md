@@ -1,6 +1,6 @@
 # Prepare one AxiSEM injection event
 
-`axisemlib-prepare` converts a
+`axisemlib prepare` converts a
 geographic `CMTSOLUTION` and `STATIONS` file to geocentric latitudes and sets
 the time and wavefield region parameters for one event. It writes the four
 solver input files and does not start a simulation.
@@ -53,7 +53,7 @@ directory:
 
 ```bash
 cd ../axisem/SOLVER
-axisemlib-prepare \
+axisemlib prepare \
     --region-box 114 132 41 46 450 \
     --t0-injection 1166.926174 \
     --cmtsolution CMT_DIR/CMTSOLUTION_SKS_1 \

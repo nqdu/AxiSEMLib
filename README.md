@@ -27,13 +27,14 @@ axisemlib merge cube2sph SPECFEM_DB ../axisem/SOLVER/boundary_faces.dat
 axisemlib seismogram AXISEM_RUN --output-dir SEISMOGRAMS
 axisemlib transpose 2.0 AXISEM_RUN
 axisemlib model --model ak135 --output-dir ../axisem/MESHER
+axisemlib prepare --region-box 114 132 41 46 450 --t0-injection 1166.926174
 mpirun -n 8 axisemlib coupling param.yaml
 ```
 
 `merge cart` also requires `--utm-zone`. Seismograms are written as
 `NETWORK.STATION.BX{N,E,Z}.dat`. The coupling command reads paths and time
 settings from its YAML file. Run `axisemlib --help` or a subcommand's `--help`
-for arguments. `axisemlib-prepare` prepares one event's solver inputs.
+for arguments. `axisemlib prepare` prepares one event's solver inputs.
 
 The Python API starts with:
 

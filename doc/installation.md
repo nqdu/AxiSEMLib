@@ -40,7 +40,7 @@ running from another directory.
 The default installation includes dependencies for MPI coupling, wavefield
 transposition, and reciprocity plotting. Use an environment whose MPI library
 matches the job launcher. Check the commands with `axisemlib --help` and
-`axisemlib-prepare --help`.
+`axisemlib prepare --help`.
 Wavefield transposition also needs `h5repack` on `PATH`.
 
 ## Build the AxiSEM mesh
