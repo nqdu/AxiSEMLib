@@ -68,15 +68,6 @@ The default model is PREM. The command writes `<model>.smooth.bm` for
 Use `--ngll`, `--element-size-km`, or `--no-plot` to change the smoothing
 grid or outputs. The default grid spacing is 1 km.
 
-Convert the generated depth profile to the SPECFEM tomography format:
-
-```bash
-axisemlib model tomo --profile ../axisem/MESHER/ak135.txt --output tomography_model.xyz
-```
-
-The tomography grid uses the bounds and 101 × 121 × 45 dimensions from the
-original `MESHER/smooth_model/specfem_tomo_interp.py` script.
-
 ## Other installed commands
 
 `axisemlib-prepare` creates one event's `CMTSOLUTION`, `STATIONS`, and

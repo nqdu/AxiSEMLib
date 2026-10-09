@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import numpy as np
-
 from .smooth import smooth_pde
 
 
@@ -59,49 +57,3 @@ def generate_model(
         plt.close(fig)
 
     return external_path, profile_path
-
-
-def write_tomography_model(
-    profile_path: Path,
-    output_path: Path,
-    x_bounds: tuple[float, float] = (-270000.0, 270000.0),
-    y_bounds: tuple[float, float] = (-300000.0, 300000.0),
-    z_bounds: tuple[float, float] = (-220000.0, 0.0),
-    shape: tuple[int, int, int] = (101, 121, 45),
-) -> Path:
-    """Interpolate a radial profile onto a SPECFEM tomography grid."""
-    nx, ny, nz = shape
-    if min(shape) < 2:
-        raise ValueError("each grid dimension must contain at least two points")
-    data = np.loadtxt(profile_path, ndmin=2)
-    if data.shape[1] < 4:
-        raise ValueError("profile must contain depth, vp, vs, and rho columns")
-    order = np.argsort(data[:, 0])
-    depth_m = data[order, 0] * 1000.0
-    x = np.linspace(*x_bounds, nx)
-    y = np.linspace(*y_bounds, ny)
-    z = np.linspace(*z_bounds, nz)
-    if z[0] < depth_m[0] or z[-1] > depth_m[-1]:
-        raise ValueError("tomography depth range extends outside the radial profile")
-
-    vp = np.interp(z, depth_m, data[order, 1])
-    vs = np.interp(z, depth_m, data[order, 2])
-    rho = np.interp(z, depth_m, data[order, 3])
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w") as stream:
-        stream.write(f"{x[0]:f} {y[0]:f} {z[0]:f} {x[-1]:f} {y[-1]:f} {z[-1]:f}\n")
-        stream.write(f"{x[1]-x[0]:f} {y[1]-y[0]:f} {z[1]-z[0]:f}\n")
-        stream.write(f"{nx} {ny} {nz}\n")
-        stream.write(
-            f"{vp.min():f} {vp.max():f} {vs.min():f} {vs.max():f} "
-            f"{rho.min():f} {rho.max():f}\n"
-        )
-        for iz, depth in enumerate(z):
-            for north in y:
-                for east in x:
-                    stream.write(
-                        f"{east:f} {north:f} {depth:f} "
-                        f"{vp[iz]:f} {vs[iz]:f} {rho[iz]:f}\n"
-                    )
-    return output_path

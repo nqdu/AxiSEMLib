@@ -31,16 +31,13 @@ def build_parser() -> argparse.ArgumentParser:
     transpose.add_argument("size_gb_per_rank", type=float, help="Read buffer size in GiB")
     transpose.add_argument("run_dirs", type=Path, nargs="+", help="AxiSEM run directories")
 
-    model = commands.add_parser("model", help="Generate a smoothed AxiSEM model or tomography grid")
-    model.add_argument("mode", choices=("smooth", "tomo"), nargs="?", default="smooth")
+    model = commands.add_parser("model", help="Generate a smoothed AxiSEM model")
     model.add_argument("--model", choices=("prem", "ak135"), default="prem")
     model.add_argument("--sigma-km", type=float, default=5.0)
     model.add_argument("--ngll", type=int, default=5)
     model.add_argument("--element-size-km", type=float, default=1.0)
     model.add_argument("--output-dir", type=Path, default=Path("."))
     model.add_argument("--no-plot", action="store_true")
-    model.add_argument("--profile", type=Path, help="Radial profile for tomo mode")
-    model.add_argument("--output", type=Path, help="Tomography output file")
 
     return parser
 
@@ -79,28 +76,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "model":
-        from .smooth_model import generate_model, write_tomography_model
+        from .smooth_model import generate_model
 
-        if args.mode == "smooth":
-            if args.profile or args.output:
-                parser.error("--profile and --output apply only to model tomo")
-            try:
-                external, profile = generate_model(
-                    args.model, args.sigma_km, args.ngll,
-                    args.element_size_km, args.output_dir, not args.no_plot,
-                )
-            except ValueError as exc:
-                parser.error(str(exc))
-            print(f"Wrote {external} and {profile}")
-        else:
-            if args.profile is None:
-                parser.error("model tomo requires --profile")
-            output = args.output or args.output_dir / "tomography_model.xyz"
-            try:
-                write_tomography_model(args.profile, output)
-            except ValueError as exc:
-                parser.error(str(exc))
-            print(f"Wrote {output}")
+        try:
+            external, profile = generate_model(
+                args.model, args.sigma_km, args.ngll,
+                args.element_size_km, args.output_dir, not args.no_plot,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"Wrote {external} and {profile}")
         return 0
 
     from .run_coupling import main as run_coupling
