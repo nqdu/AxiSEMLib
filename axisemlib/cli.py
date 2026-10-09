@@ -39,9 +39,6 @@ def build_parser() -> argparse.ArgumentParser:
     model_options.add_argument("--output-dir", type=Path, default=Path("."))
     model_options.add_argument("--no-plot", action="store_true")
     commands.add_parser(
-        "model", parents=[model_options], help="Generate a smoothed AxiSEM model"
-    )
-    commands.add_parser(
         "smooth", parents=[model_options], help="Generate a smoothed AxiSEM model"
     )
 
@@ -90,7 +87,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
 
-    if args.command in ("model", "smooth"):
+    if args.command == "smooth":
         from .smooth_model import generate_model
 
         try:

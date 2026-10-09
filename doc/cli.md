@@ -55,24 +55,18 @@ element-major boundary fields or standard DOF fields as binary files, removes
 the converted fields from NetCDF, then uses `h5repack` on `PATH` to repack the
 files.
 
-## `axisemlib model`
+## `axisemlib smooth`
 
 Generate a smoothed PREM or ak135 model for the AxiSEM mesher:
 
 ```bash
-axisemlib model --model ak135 --sigma-km 5 --output-dir ../axisem/MESHER
+axisemlib smooth --model ak135 --sigma-km 5 --output-dir ../axisem/MESHER
 ```
 
 The default model is PREM. The command writes `<model>.smooth.bm` for
 `EXT_MODEL`, `<model>.txt` as a radial depth profile, and `smooth.jpg`.
 Use `--ngll`, `--element-size-km`, or `--no-plot` to change the smoothing
 grid or outputs. The default grid spacing is 1 km.
-
-## `axisemlib smooth`
-
-`axisemlib smooth` is an alias for `axisemlib model` and accepts the same
-options. Use it to generate an external `ak135.smooth.bm` or
-`prem.smooth.bm` file before running the AxiSEM mesher.
 
 ## `axisemlib prepare`
 
