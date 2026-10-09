@@ -1,9 +1,9 @@
 import numpy as np 
 import os 
 from mpi4py import MPI
-import sys 
+from argparse import ArgumentParser
+from pathlib import Path
 import yaml 
-import os
 
 def _validate_config(config):
     """
@@ -88,17 +88,18 @@ def _validate_config(config):
         raise ValueError("Invalid Configuration")
     
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python coupling.py config.yaml")
-        return -1
+def main(config_file: str | Path | None = None) -> int:
+    """Run coupling from a YAML file, with or without the package CLI."""
+    if config_file is None:
+        parser = ArgumentParser(description="Generate AxiSEM/SPECFEM coupling files")
+        parser.add_argument("config", type=Path, help="Coupling YAML configuration")
+        config_file = parser.parse_args().config
     
     # MPI init
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
 
     # read config file
-    config_file = sys.argv[1]
     with open(config_file, 'r') as f:
         param = yaml.safe_load(f)
 
@@ -122,22 +123,23 @@ def main():
     coupling_method = param['coupling_method'].lower()
     system = param['SPECFEM_SYSTEM'].lower()
     if coupling_method == 'wd' and system == 'cart':
-        from driver import coupling_cart_stacey
+        from .driver import coupling_cart_stacey
         coupling_cart_stacey(param)
     elif coupling_method == 'wd' and system == 'cube2sph':
-        from driver import coupling_cube2sph
+        from .driver import coupling_cube2sph
         coupling_cube2sph(param)
     elif coupling_method == 'ef' and system == 'cube2sph':
-        from driver import equivalent_force_cube2sph
+        from .driver import equivalent_force_cube2sph
         equivalent_force_cube2sph(param)
     else:
         if rank ==0 :
             print(f"[X] Coupling method '{coupling_method}' with system '{system}' not implemented.")
-        return -1 
+        return 1
 
 
     # MPI finalize
     MPI.Finalize()
+    return 0
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

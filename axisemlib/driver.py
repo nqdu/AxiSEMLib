@@ -1,10 +1,10 @@
-from database import AxiBasicDB
+from .database import AxiBasicDB
 import numpy as np 
 import os  
 from mpi4py import MPI
-from utils import cart2sph,allocate_task
-from utils import resample_axisem,geodetic_to_geocentric
-from FortranIO import FortranIO  
+from .utils import cart2sph,allocate_task
+from .utils import resample_axisem,geodetic_to_geocentric
+from .FortranIO import FortranIO
 from pathlib import Path
 from collections.abc import Sequence
 from typing import Any, TextIO
@@ -91,7 +91,7 @@ def _surface_traction(stress: np.ndarray, normals: np.ndarray) -> np.ndarray:
 def _fluid_surface_moment(db: AxiBasicDB, iface: int, normals: np.ndarray,
                           displacement: np.ndarray) -> np.ndarray:
     """Build the isotropic acoustic moment from normal displacement."""
-    from sem_funcs import lagrange_interpol_2D_td
+    from .sem_funcs import lagrange_interpol_2D_td
 
     _, points = db._surface_points(iface)
     moment = np.zeros((NGLL2, 6, db.nt))
@@ -99,7 +99,7 @@ def _fluid_surface_moment(db: AxiBasicDB, iface: int, normals: np.ndarray,
         elem = int(db.point_mesh_index[point])
         nodes_xi = db.glj if db.axis[elem] == 1 else db.gll
         bulk_modulus = lagrange_interpol_2D_td(
-            nodes_xi, db.gll, db.xlamda[elem].T[None, :, :],
+            nodes_xi, db.gll, db.xlamda[elem, :, :, None],
             db.point_xi[point], db.point_eta[point])[0]
         pressure_jump = bulk_modulus * (normals[row] @ displacement[row])
         moment[row, 0:3] = pressure_jump
@@ -149,8 +149,8 @@ def read_boundary_points(
 
 def get_field_proc_cart(args: tuple[int, str, str, str, np.ndarray, int]) -> None:
     from pyproj import Proj
-    from utils import rotate_EN_to_UTM
-    from utils import rotation_matrix,rotate_tensor2
+    from .utils import rotate_EN_to_UTM
+    from .utils import rotation_matrix,rotate_tensor2
 
     # unpack input paramters
     iproc,basedir,coordir,outdir,tvec,UTM_ZONE = args
@@ -258,7 +258,7 @@ def get_field_proc_cart_boundary(
         args: tuple[int, str, str, str, np.ndarray, int, int]) -> None:
     """Write solid velocity/traction or fluid dchi/displacement by face."""
     from pyproj import Proj
-    from utils import rotate_EN_to_UTM,rotation_matrix,rotate_tensor2
+    from .utils import rotate_EN_to_UTM,rotation_matrix,rotate_tensor2
 
     iproc,basedir,coordir,outdir,tvec,UTM_ZONE,first_iface = args
     db = AxiBasicDB()
@@ -582,7 +582,7 @@ def equivalent_force_cube2sph(param: dict[str, Any]) -> None:
     :param param: Description
     :type param: dict
     """
-    from jacobian import compute_jacobian_surface,moment_to_force
+    from .jacobian import compute_jacobian_surface,moment_to_force
 
     # mpi 
     comm = MPI.COMM_WORLD

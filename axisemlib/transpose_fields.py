@@ -84,12 +84,13 @@ def repack_after_removing_fields(infile: Path, fields: set[str], boundary: bool)
     backup.unlink()
 
 
-def main() -> None:
-    if len(sys.argv) < 3:
-        print("Usage: transpose_fields.py sizeGB_per_rank direc1 [direc2 ...]", file=sys.stderr)
+def main(argv: list[str] | None = None) -> None:
+    arguments = sys.argv[1:] if argv is None else argv
+    if len(arguments) < 2:
+        print("Usage: axisemlib transpose sizeGB_per_rank RUN_DIR [RUN_DIR ...]", file=sys.stderr)
         raise SystemExit(1)
     try:
-        size_gb_per_rank = float(sys.argv[1])
+        size_gb_per_rank = float(arguments[0])
     except ValueError:
         print("sizeGB_per_rank must be a positive number", file=sys.stderr)
         raise SystemExit(1)
@@ -99,7 +100,7 @@ def main() -> None:
 
     jobs: list[tuple[Path, str, bool]] = []
     seen: set[Path] = set()
-    for path in sys.argv[2:]:
+    for path in arguments[1:]:
         directory = Path(path)
         for infile in find_inputs(directory):
             resolved = infile.resolve()

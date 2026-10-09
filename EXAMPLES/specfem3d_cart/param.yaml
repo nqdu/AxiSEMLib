@@ -1,6 +1,6 @@
 # parameter setting for generating injection field
 # working directory 
-AXISEM_DIR: ../axisem/SOLVER/ak135 
+AXISEM_DIR: ../../../axisem/SOLVER/ak135
 SPECFEM_DB: ~/SPECFEM/DATABASES_MPI  # ${SPECFEM_DIR}/DATABASES_MPI
 SPECFEM_DATA: ~/SPECFEM/DATA  # ${SPECFEM_DIR}/DATA  #only needed when using equivalent forces coupling
 SPECFEM_SYSTEM: 'cart'  # 'cart' or 'cube2sph'

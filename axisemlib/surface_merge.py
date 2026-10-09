@@ -6,7 +6,7 @@ import re
 
 import numpy as np
 
-from utils import cart2sph, geodetic_to_geocentric
+from .utils import cart2sph, geodetic_to_geocentric
 
 
 EARTH_RADIUS_M = 6371000.0
@@ -107,13 +107,14 @@ def merge_surfaces(input_dir, output_file, system, utm_zone=None):
     return face_sources
 
 
-if __name__ == '__main__':
+def main(argv=None):
+    """Run the standalone boundary-face merge command."""
     parser = ArgumentParser(description=__doc__)
     parser.add_argument('system', choices=('cube2sph', 'cart'))
     parser.add_argument('input_dir', help='SPECFEM DATABASES_MPI directory')
     parser.add_argument('output_file', help='AxiSEM boundary_faces.dat path')
     parser.add_argument('--utm-zone', type=int, help='required for cart input')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.system == 'cart' and args.utm_zone is None:
         parser.error('--utm-zone is required for cart input')
     if args.system == 'cube2sph' and args.utm_zone is not None:
@@ -121,3 +122,7 @@ if __name__ == '__main__':
     sources = merge_surfaces(args.input_dir, args.output_file,
                              args.system, args.utm_zone)
     print(f'Wrote {len(sources)} faces to {args.output_file}')
+
+
+if __name__ == '__main__':
+    main()

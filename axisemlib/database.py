@@ -1,7 +1,7 @@
 from pathlib import Path
 import numpy as np 
 import h5py 
-from utils import rotation_matrix,rotate_tensor2
+from .utils import rotation_matrix,rotate_tensor2
 
 class AxiBasicDB:
     def __init__(self) -> None:
@@ -88,10 +88,10 @@ class AxiBasicDB:
 
         # other useful arrays
         self.G0 = fio['Mesh/G0'][:]
-        self.G1 = fio['Mesh/G1'][:].T 
-        self.G2 = fio['Mesh/G2'][:].T
-        self.G1T = np.require(self.G1.T,requirements=['F_CONTIGUOUS'])
-        self.G2T = np.require(self.G2.T,requirements=['F_CONTIGUOUS'])
+        self.G1 = np.ascontiguousarray(fio['Mesh/G1'][:].T)
+        self.G2 = np.ascontiguousarray(fio['Mesh/G2'][:].T)
+        self.G1T = np.ascontiguousarray(self.G1.T)
+        self.G2T = np.ascontiguousarray(self.G2.T)
         self.gll = fio['Mesh/gll'][:]
         self.glj = fio['Mesh/glj'][:]
 
@@ -160,10 +160,10 @@ class AxiBasicDB:
             self.skelid = mesh['fem_mesh'][:]
             self.ibool = mesh['sem_mesh'][:]
             self.G0 = mesh['G0'][:]
-            self.G1 = mesh['G1'][:].T
-            self.G2 = mesh['G2'][:].T
-            self.G1T = np.require(self.G1.T, requirements=['F_CONTIGUOUS'])
-            self.G2T = np.require(self.G2.T, requirements=['F_CONTIGUOUS'])
+            self.G1 = np.ascontiguousarray(mesh['G1'][:].T)
+            self.G2 = np.ascontiguousarray(mesh['G2'][:].T)
+            self.G1T = np.ascontiguousarray(self.G1.T)
+            self.G2T = np.ascontiguousarray(self.G2.T)
             self.gll = mesh['gll'][:]
             self.glj = mesh['glj'][:]
 
@@ -394,7 +394,7 @@ class AxiBasicDB:
         pass
 
     def read_cmt(self,cmtfile:str):
-        from utils import read_cmtsolution
+        from .utils import read_cmtsolution
         mzz,mxx,myy,mxz,myz,mxy = read_cmtsolution(cmtfile)
         mzz,mxx,myy,mxz,myz,mxy = map(lambda x: x / self.mag,[mzz,mxx,myy,mxz,myz,mxy])
 
@@ -422,7 +422,7 @@ class AxiBasicDB:
         eta: float
             local coordinate eta
         """
-        from sem_funcs import inside_element
+        from .sem_funcs import inside_element
         id_elem = None 
 
         # get nearest 10 points 
@@ -536,48 +536,38 @@ class AxiBasicDB:
         if getattr(self, '_boundary_mode', False) and not self.is_elastic[elemid]:
             return self._get_element_displ_fluid(elemid,xi,eta,stype)
 
-        from sem_funcs import lagrange_interpol_2D_td
-        nt = self.nt 
+        from .sem_funcs import lagrange_interpol_2D_td
 
-        # allocate space
-        us = np.zeros((nt)); up = us * 0; uz = us * 1.
-        
-        # dataset info
-        ngll = self.ngll
-        utemp = np.zeros((3,ngll,ngll,nt),dtype=float)
-
-        # read dataset
-        utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
-        utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
-        utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
-        utemp = np.transpose(utemp,(3,2,1,0))
-
+        # Field arrays are stored as (eta, xi, time), with time contiguous.
         sgll = self.gll
         zgll = self.gll
         flag = self.axis[elemid] == 1
         if flag:
             sgll = self.glj
-        us = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,0],xi,eta)
-        up = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,1],xi,eta)
-        uz = lagrange_interpol_2D_td(sgll,zgll,utemp[:,:,:,2],xi,eta)
+        us = lagrange_interpol_2D_td(
+            sgll,zgll,self._get_field_elem(stype,'disp_s',elemid),xi,eta)
+        up = lagrange_interpol_2D_td(
+            sgll,zgll,self._get_field_elem(stype,'disp_p',elemid),xi,eta)
+        uz = lagrange_interpol_2D_td(
+            sgll,zgll,self._get_field_elem(stype,'disp_z',elemid),xi,eta)
         
         return us,up,uz
 
     def _get_chi(self,elem,xi,eta,stype):
-        from sem_funcs import lagrange_interpol_2D_td
+        from .sem_funcs import lagrange_interpol_2D_td
 
         values = self._get_field_elem(stype,'chi',elem)
         nodes_xi = self.glj if self.axis[elem] == 1 else self.gll
-        return lagrange_interpol_2D_td(nodes_xi,self.gll,values.transpose(2,1,0),xi,eta)
+        return lagrange_interpol_2D_td(nodes_xi,self.gll,values,xi,eta)
 
     def _get_element_displ_fluid(self,elem,xi,eta,stype):
         """Derive modal fluid displacement from chi and the selected mesh."""
-        from sem_funcs import strain_td,lagrange_interpol_2D_td
+        from .sem_funcs import strain_td,lagrange_interpol_2D_td
 
-        # Arrange chi as the s component expected by the existing strain routine.
+        # Arrange chi as the s component of the C-order strain input.
         values = self._get_field_elem(stype,'chi',elem)
-        utemp = np.zeros((self.nt,self.ngll,self.ngll,3),dtype=float)
-        utemp[:,:,:,0] = values.transpose(2,1,0)
+        utemp = np.zeros((3,self.ngll,self.ngll,self.nt),dtype=float)
+        utemp[0,...] = values
 
         is_axi = self.axis[elem] == 1
         sgll = self.glj if is_axi else self.gll
@@ -586,23 +576,23 @@ class AxiBasicDB:
         # With chi in the s slot, monopole strain contains dchi/ds,
         # chi/s, and dchi/dz in components 0, 1, and 4, respectively.
         strain = strain_td(utemp,self.G2,GT,sgll,self.gll,self.ngll-1,self.nt,
-                           self._element_skeleton(elem),self.eltype[elem],is_axi,'monopole')
+                             self._element_skeleton(elem),self.eltype[elem],is_axi,'monopole')
 
         # Interpolate the gradient and convert it to displacement using local density.
         rho = lagrange_interpol_2D_td(
-            sgll,self.gll,self.xrho[elem].T[None,:,:],xi,eta)[0]
+            sgll,self.gll,self.xrho[elem,:,:,None],xi,eta)[0]
         if rho <= 0:
             raise ValueError(f'Invalid density in fluid element {elem}')
 
-        us = lagrange_interpol_2D_td(sgll,self.gll,strain[:,:,:,0],xi,eta)/rho
-        uz = 2*lagrange_interpol_2D_td(sgll,self.gll,strain[:,:,:,4],xi,eta)/rho
+        us = lagrange_interpol_2D_td(sgll,self.gll,strain[0],xi,eta)/rho
+        uz = 2*lagrange_interpol_2D_td(sgll,self.gll,strain[4],xi,eta)/rho
         order = {'monopole':0,'dipole':1,'quadpole':2}[self._get_excitation_type(stype)]
 
         # Only nonzero azimuthal orders contribute an azimuthal component.
         if order == 0:
             up = np.zeros_like(us)
         else:
-            up = order*lagrange_interpol_2D_td(sgll,self.gll,strain[:,:,:,1],xi,eta)/rho
+            up = order*lagrange_interpol_2D_td(sgll,self.gll,strain[1],xi,eta)/rho
 
         return us,up,uz
     
@@ -629,7 +619,7 @@ class AxiBasicDB:
         strain : np.ndarray
                 shape(6,nt), ess,epp,ezz,epz,esz,esp
         """
-        from sem_funcs import lagrange_interpol_2D_td,strain_td
+        from .sem_funcs import lagrange_interpol_2D_td,strain_td
         nt = self.nt
         ngll = self.ngll
 
@@ -644,7 +634,6 @@ class AxiBasicDB:
         utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
         utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
         utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
-        utemp = np.transpose(utemp,(3,2,1,0))
 
         # gll/glj array
         sgll = self.gll
@@ -663,15 +652,15 @@ class AxiBasicDB:
             G = self.G2 
             GT = self.G2T 
 
-        # compute strain shape(nt,npol+1,npol+1,6)
+        # Compute strain as (component, eta, xi, time).
         etype = self._get_excitation_type(stype)
         strain = strain_td(utemp,G,GT,sgll,zgll,ngll-1,nt,
-                            skel,eltype,is_axi,etype)
+                              skel,eltype,is_axi,etype)
 
         # interpolate 
         # es shape(6,nt)
         for j in range(6):
-            eps[j,:] = lagrange_interpol_2D_td(sgll,zgll,strain[:,:,:,j],xi,eta)
+            eps[j,:] = lagrange_interpol_2D_td(sgll,zgll,strain[j],xi,eta)
         
         return eps
 
@@ -695,8 +684,8 @@ class AxiBasicDB:
         stress : np.ndarray
                 shape(6,nt), ess,epp,ezz,epz,esz,esp
         """
-        from sem_funcs import lagrange_interpol_2D_td,strain_td,find_theta
-        from utils import c_ijkl_ani
+        from .sem_funcs import lagrange_interpol_2D_td,strain_td,find_theta
+        from .utils import c_ijkl_ani
         nt = self.nt 
         ngll = self.ngll
     
@@ -707,20 +696,13 @@ class AxiBasicDB:
         utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
         utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
         utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
-        utemp = np.transpose(utemp,(3,2,1,0))
 
-        # alloc arrays for elastic tensor
-        xmu = np.zeros((ngll,ngll),dtype=float)
-        xlam = np.zeros((ngll,ngll),dtype=float)
-        xxi = xlam * 1. 
-        xphi = xlam * 1. 
-        xeta = xlam * 1.
-        xmu[:,:] = self.xmu[elemid,:,:]; xlam[:,:] = self.xlamda[elemid,:,:]
-        xxi[:,:] = self.xxi[elemid,:,:]; xphi[:,:] = self.xphi[elemid,:,:]
-        xeta[:,:] = self.xeta[elemid,:,:]
-        xmu = np.transpose(xmu); xlam = np.transpose(xlam)
-        xxi = np.transpose(xxi); xphi = np.transpose(xphi)
-        xeta = np.transpose(xeta)
+        # Material arrays already have the C-order (eta, xi) mesh layout.
+        xmu = self.xmu[elemid]
+        xlam = self.xlamda[elemid]
+        xxi = self.xxi[elemid]
+        xphi = self.xphi[elemid]
+        xeta = self.xeta[elemid]
 
         # gll/glj array
         sgll = self.gll
@@ -740,48 +722,47 @@ class AxiBasicDB:
             G = self.G2 
             GT = self.G2T 
 
-        # compute strain shape(nt,npol+1,npol+1,6)
+        # Compute strain as (component, eta, xi, time).
         etype = self._get_excitation_type(stype)
         e = strain_td(utemp,G,GT,sgll,zgll,ngll-1,self.nt,
-                            skel,eltype,self.axis[elemid]==1,etype)
+                        skel,eltype,self.axis[elemid]==1,etype)
         
-        # find theta
         theta = find_theta(sgll,zgll,skel,eltype)
 
         # get elastic tensor c21
-        c11 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 1, 1)
-        c12 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 2, 2)
-        c13 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 3)
-        c15 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 1)
-        c22 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 2, 2)
-        c23 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 3)
-        c25 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 1)
-        c33 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 3)
-        c35 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 1)
-        c44 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 2, 3)
-        c46 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 1, 2)
-        c55 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 1, 3, 1)
-        c66 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 2, 1, 2)
+        c11 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 1, 1)[:,:,None]
+        c12 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 2, 2)[:,:,None]
+        c13 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 3)[:,:,None]
+        c15 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 1)[:,:,None]
+        c22 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 2, 2)[:,:,None]
+        c23 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 3)[:,:,None]
+        c25 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 1)[:,:,None]
+        c33 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 3)[:,:,None]
+        c35 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 1)[:,:,None]
+        c44 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 2, 3)[:,:,None]
+        c46 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 1, 2)[:,:,None]
+        c55 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 1, 3, 1)[:,:,None]
+        c66 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 2, 1, 2)[:,:,None]
         c14 = 0.; c26 = 0.; c36 = 0.; c24 = 0.
         c16 = 0.; c45 = 0.; c56 = 0.; c34 = 0.
 
         # compute stress
         stress = e * 0.
-        e[..., 3:6] = 2. * e[...,3:6]
+        e[3:6] = 2. * e[3:6]
 
         # Compute stress components explicitly using Voigt notation
-        stress[..., 0] = c11 * e[..., 0] + c16 * e[..., 5] + c12 * e[..., 1] + c15 * e[..., 4] + c14 * e[..., 3] + c13 * e[..., 2]  # sxx → s[..., 0]
-        stress[..., 1] = c12 * e[..., 0] + c26 * e[..., 5] + c22 * e[..., 1] + c25 * e[..., 4] + c24 * e[..., 3] + c23 * e[..., 2]  # syy → s[..., 1]
-        stress[..., 2] = c13 * e[..., 0] + c36 * e[..., 5] + c23 * e[..., 1] + c35 * e[..., 4] + c34 * e[..., 3] + c33 * e[..., 2]  # szz → s[..., 2]
-        stress[..., 3] = c14 * e[..., 0] + c46 * e[..., 5] + c24 * e[..., 1] + c45 * e[..., 4] + c44 * e[..., 3] + c34 * e[..., 2]  # syz → s[..., 3]
-        stress[..., 4] = c15 * e[..., 0] + c56 * e[..., 5] + c25 * e[..., 1] + c55 * e[..., 4] + c45 * e[..., 3] + c35 * e[..., 2]  # sxz → s[..., 4]
-        stress[..., 5] = c16 * e[..., 0] + c66 * e[..., 5] + c26 * e[..., 1] + c56 * e[..., 4] + c46 * e[..., 3] + c36 * e[..., 2]  # sxy → s[..., 5]
+        stress[0] = c11 * e[0] + c16 * e[5] + c12 * e[1] + c15 * e[4] + c14 * e[3] + c13 * e[2]  # sxx → s[..., 0]
+        stress[1] = c12 * e[0] + c26 * e[5] + c22 * e[1] + c25 * e[4] + c24 * e[3] + c23 * e[2]  # syy → s[..., 1]
+        stress[2] = c13 * e[0] + c36 * e[5] + c23 * e[1] + c35 * e[4] + c34 * e[3] + c33 * e[2]  # szz → s[..., 2]
+        stress[3] = c14 * e[0] + c46 * e[5] + c24 * e[1] + c45 * e[4] + c44 * e[3] + c34 * e[2]  # syz → s[..., 3]
+        stress[4] = c15 * e[0] + c56 * e[5] + c25 * e[1] + c55 * e[4] + c45 * e[3] + c35 * e[2]  # sxz → s[..., 4]
+        stress[5] = c16 * e[0] + c66 * e[5] + c26 * e[1] + c56 * e[4] + c46 * e[3] + c36 * e[2]  # sxy → s[..., 5]
 
         # interpolate 
         # es shape(6,nt)
         sigma = np.zeros((6,nt))
         for j in range(6):
-            sigma[j,:] = lagrange_interpol_2D_td(sgll,zgll,stress[:,:,:,j],xi,eta)
+            sigma[j,:] = lagrange_interpol_2D_td(sgll,zgll,stress[j],xi,eta)
         
         return sigma
     
@@ -808,8 +789,8 @@ class AxiBasicDB:
                 shape(6,nt), ess,epp,ezz,epz,esz,esp
         """
         # get stress
-        from sem_funcs import lagrange_interpol_2D_td,strain_td,find_theta
-        from utils import c_ijkl_ani
+        from .sem_funcs import lagrange_interpol_2D_td,find_theta
+        from .utils import c_ijkl_ani
         nt = self.nt 
         ngll = self.ngll
     
@@ -820,29 +801,21 @@ class AxiBasicDB:
         utemp[0,...] = self._get_field_elem(stype,'disp_s',elemid)
         utemp[2,...] = self._get_field_elem(stype,'disp_z',elemid)
         utemp[1,...] = self._get_field_elem(stype,'disp_p',elemid)
-        utemp = np.transpose(utemp,(3,2,1,0))
 
-        # construct an equivalent strain tensor
-        e = np.zeros((nt,ngll,ngll,6),dtype=float,order='F')
-        e[...,0] = norm_spz[0] * utemp[...,0]
-        e[...,1] = norm_spz[1] * utemp[...,1]
-        e[...,2] = norm_spz[2] * utemp[...,2]
-        e[...,3] = norm_spz[1] * utemp[...,2] + norm_spz[2] * utemp[...,1]
-        e[...,4] = norm_spz[0] * utemp[...,2] + norm_spz[2] * utemp[...,0]
-        e[...,5] = norm_spz[0] * utemp[...,1] + norm_spz[1] * utemp[...,0]
+        # Construct the equivalent strain with time last in C storage.
+        e = np.zeros((6,ngll,ngll,nt),dtype=float)
+        e[0] = norm_spz[0] * utemp[0]
+        e[1] = norm_spz[1] * utemp[1]
+        e[2] = norm_spz[2] * utemp[2]
+        e[3] = norm_spz[1] * utemp[2] + norm_spz[2] * utemp[1]
+        e[4] = norm_spz[0] * utemp[2] + norm_spz[2] * utemp[0]
+        e[5] = norm_spz[0] * utemp[1] + norm_spz[1] * utemp[0]
 
-        # alloc arrays for elastic tensor
-        xmu = np.zeros((ngll,ngll),dtype=float)
-        xlam = np.zeros((ngll,ngll),dtype=float)
-        xxi = xlam * 1. 
-        xphi = xlam * 1. 
-        xeta = xlam * 1.
-        xmu[:,:] = self.xmu[elemid,:,:]; xlam[:,:] = self.xlamda[elemid,:,:]
-        xxi[:,:] = self.xxi[elemid,:,:]; xphi[:,:] = self.xphi[elemid,:,:]
-        xeta[:,:] = self.xeta[elemid,:,:]
-        xmu = np.transpose(xmu); xlam = np.transpose(xlam)
-        xxi = np.transpose(xxi); xphi = np.transpose(xphi)
-        xeta = np.transpose(xeta)
+        xmu = self.xmu[elemid]
+        xlam = self.xlamda[elemid]
+        xxi = self.xxi[elemid]
+        xphi = self.xphi[elemid]
+        xeta = self.xeta[elemid]
 
         # gll/glj array
         sgll = self.gll
@@ -855,47 +828,40 @@ class AxiBasicDB:
         skel = self._element_skeleton(elemid)
         eltype = self.eltype[elemid]
 
-        if self.axis[elemid]:
-            G = self.G2 
-            GT = self.G1T 
-        else:
-            G = self.G2 
-            GT = self.G2T 
-
         # find theta
         theta = find_theta(sgll,zgll,skel,eltype)
 
         # get elastic tensor c21
-        c11 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 1, 1)
-        c12 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 2, 2)
-        c13 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 3)
-        c15 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 1)
-        c22 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 2, 2)
-        c23 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 3)
-        c25 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 1)
-        c33 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 3)
-        c35 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 1)
-        c44 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 2, 3)
-        c46 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 1, 2)
-        c55 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 1, 3, 1)
-        c66 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 2, 1, 2)
+        c11 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 1, 1)[:,:,None]
+        c12 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 2, 2)[:,:,None]
+        c13 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 3)[:,:,None]
+        c15 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 1, 3, 1)[:,:,None]
+        c22 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 2, 2)[:,:,None]
+        c23 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 3)[:,:,None]
+        c25 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 2, 3, 1)[:,:,None]
+        c33 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 3)[:,:,None]
+        c35 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 3, 3, 1)[:,:,None]
+        c44 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 2, 3)[:,:,None]
+        c46 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 2, 3, 1, 2)[:,:,None]
+        c55 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 3, 1, 3, 1)[:,:,None]
+        c66 = c_ijkl_ani(xlam,xmu,xxi,xphi,xeta,theta, 0., 1, 2, 1, 2)[:,:,None]
         c14 = 0.; c26 = 0.; c36 = 0.; c24 = 0.
         c16 = 0.; c45 = 0.; c56 = 0.; c34 = 0.
 
         # Compute stress components explicitly using Voigt notation
         stress = e * 0.
-        stress[..., 0] = c11 * e[..., 0] + c16 * e[..., 5] + c12 * e[..., 1] + c15 * e[..., 4] + c14 * e[..., 3] + c13 * e[..., 2]  # sxx → s[..., 0]
-        stress[..., 1] = c12 * e[..., 0] + c26 * e[..., 5] + c22 * e[..., 1] + c25 * e[..., 4] + c24 * e[..., 3] + c23 * e[..., 2]  # syy → s[..., 1]
-        stress[..., 2] = c13 * e[..., 0] + c36 * e[..., 5] + c23 * e[..., 1] + c35 * e[..., 4] + c34 * e[..., 3] + c33 * e[..., 2]  # szz → s[..., 2]
-        stress[..., 3] = c14 * e[..., 0] + c46 * e[..., 5] + c24 * e[..., 1] + c45 * e[..., 4] + c44 * e[..., 3] + c34 * e[..., 2]  # syz → s[..., 3]
-        stress[..., 4] = c15 * e[..., 0] + c56 * e[..., 5] + c25 * e[..., 1] + c55 * e[..., 4] + c45 * e[..., 3] + c35 * e[..., 2]  # sxz → s[..., 4]
-        stress[..., 5] = c16 * e[..., 0] + c66 * e[..., 5] + c26 * e[..., 1] + c56 * e[..., 4] + c46 * e[..., 3] + c36 * e[..., 2]  # sxy → s[..., 5]
+        stress[0] = c11 * e[0] + c16 * e[5] + c12 * e[1] + c15 * e[4] + c14 * e[3] + c13 * e[2]  # sxx → s[..., 0]
+        stress[1] = c12 * e[0] + c26 * e[5] + c22 * e[1] + c25 * e[4] + c24 * e[3] + c23 * e[2]  # syy → s[..., 1]
+        stress[2] = c13 * e[0] + c36 * e[5] + c23 * e[1] + c35 * e[4] + c34 * e[3] + c33 * e[2]  # szz → s[..., 2]
+        stress[3] = c14 * e[0] + c46 * e[5] + c24 * e[1] + c45 * e[4] + c44 * e[3] + c34 * e[2]  # syz → s[..., 3]
+        stress[4] = c15 * e[0] + c56 * e[5] + c25 * e[1] + c55 * e[4] + c45 * e[3] + c35 * e[2]  # sxz → s[..., 4]
+        stress[5] = c16 * e[0] + c66 * e[5] + c26 * e[1] + c56 * e[4] + c46 * e[3] + c36 * e[2]  # sxy → s[..., 5]
 
         # interpolate 
         # es shape(6,nt)
         sigma = np.zeros((6,nt))
         for j in range(6):
-            sigma[j,:] = lagrange_interpol_2D_td(sgll,zgll,stress[:,:,:,j],xi,eta)
+            sigma[j,:] = lagrange_interpol_2D_td(sgll,zgll,stress[j],xi,eta)
         return sigma
 
     def compute_tp_recv(self,stla,stlo):

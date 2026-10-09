@@ -1,5 +1,6 @@
-from database import AxiBasicDB,rotation_matrix
+from .database import AxiBasicDB,rotation_matrix
 import numpy as np 
+from .utils import geodetic_to_geocentric
 import matplotlib.pyplot as plt 
 
 def rotate_mij_src_to_recv(mt,R):
@@ -43,6 +44,8 @@ def reciprocity(db:AxiBasicDB,cmtfile):
 
     # get source coordinates
     evla = 37.91; evlo = -77.93; evdp = 12000.
+    evla = geodetic_to_geocentric(evla)
+
     #evla = 42.65961867; evlo = 74.48293762; 
     Rs = rotation_matrix(np.deg2rad(90-evla),np.deg2rad(evlo))
 
