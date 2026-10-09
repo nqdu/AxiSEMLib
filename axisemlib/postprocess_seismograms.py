@@ -36,16 +36,22 @@ def read_run_info(attributes):
         value = attributes[name]
         return value.decode().strip() if isinstance(value, bytes) else str(value).strip()
 
+    def scalar(name):
+        value = np.asarray(attributes[name])
+        if value.size != 1:
+            raise ValueError(f"Expected one value for NetCDF attribute {name}: {value.shape}")
+        return value.item()
+
     return RunInfo(
         source_type=string("source type"),
         simulation_type=string("simulation type"),
-        source_colat=float(attributes["Source colatitude"]),
-        source_lon=float(attributes["Source longitude"]),
-        magnitude=float(attributes["scalar source magnitude"]),
-        nrec=int(attributes["number of receivers"]),
-        nt=int(attributes["length of seismogram  in time samples"]),
-        dt=float(attributes["seismogram sampling in sec"]),
-        shift=float(attributes["source shift factor in sec"]),
+        source_colat=float(scalar("Source colatitude")),
+        source_lon=float(scalar("Source longitude")),
+        magnitude=float(scalar("scalar source magnitude")),
+        nrec=int(scalar("number of receivers")),
+        nt=int(scalar("length of seismogram  in time samples")),
+        dt=float(scalar("seismogram sampling in sec")),
+        shift=float(scalar("source shift factor in sec")),
     )
 
 
