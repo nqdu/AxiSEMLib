@@ -55,6 +55,28 @@ element-major boundary fields or standard DOF fields as binary files, removes
 the converted fields from NetCDF, then uses `h5repack` on `PATH` to repack the
 files.
 
+## `axisemlib model`
+
+Generate a smoothed PREM or ak135 model for the AxiSEM mesher:
+
+```bash
+axisemlib model --model ak135 --sigma-km 5 --output-dir ../axisem/MESHER
+```
+
+The default model is PREM. The command writes `<model>.smooth.bm` for
+`EXT_MODEL`, `<model>.txt` as a radial depth profile, and `smooth.jpg`.
+Use `--ngll`, `--element-size-km`, or `--no-plot` to change the smoothing
+grid or outputs. The default grid spacing is 1 km.
+
+Convert the generated depth profile to the SPECFEM tomography format:
+
+```bash
+axisemlib model tomo --profile ../axisem/MESHER/ak135.txt --output tomography_model.xyz
+```
+
+The tomography grid uses the bounds and 101 × 121 × 45 dimensions from the
+original `MESHER/smooth_model/specfem_tomo_interp.py` script.
+
 ## Other installed commands
 
 `axisemlib-prepare` creates one event's `CMTSOLUTION`, `STATIONS`, and

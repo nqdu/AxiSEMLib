@@ -19,36 +19,13 @@ cd axisem
 ./copytemplates.sh
 ```
 
-Set the compiler and NetCDF paths in `make_axisem.macros`, then configure
-`MESHER/inparam_mesh` for the required model, period, and processor count.
-The copied mesher template selects an external `ak135.smooth.bm` file. Supply
-that model in `MESHER`, or select a built-in model such as
-`BACKGROUND_MODEL ak135` before running the mesher.
-Build and run the mesh from `MESHER`:
-
-```bash
-cd MESHER
-./submit.csh
-```
-
-Wait until `OUTPUT` reports `DONE WITH MESHER`. Move the completed mesh to the
-solver, then set `MESHNAME` in `SOLVER/inparam_basic` to the same name:
-
-```bash
-./movemesh.csh my_mesh
-```
-
-The solver is a separate Fortran program. Continue with the
-[solver and coupling workflow](workflow.md) after the mesh is available.
-AxiSEMLib's Python installation does not build the solver.
-
 ## Install the Python package
 
 Return to the parent directory, clone AxiSEMLib beside the `axisem` checkout,
 then install it in a Python 3.10 or newer environment:
 
 ```bash
-cd ../..
+cd ..
 git clone --branch devel https://github.com/nqdu/AxiSEMLib.git
 cd AxiSEMLib
 python -m venv .venv
@@ -65,6 +42,36 @@ transposition, and reciprocity plotting. Use an environment whose MPI library
 matches the job launcher. Check the commands with `axisemlib --help` and
 `axisemlib-prepare --help`.
 Wavefield transposition also needs `h5repack` on `PATH`.
+
+## Build the AxiSEM mesh
+
+Set the compiler and NetCDF paths in `../axisem/make_axisem.macros`, then
+configure `../axisem/MESHER/inparam_mesh` for the model, period, and processor
+count. The copied mesher template selects an external `ak135.smooth.bm` file.
+Generate it from the AxiSEMLib checkout:
+
+```bash
+axisemlib model --model ak135 --output-dir ../axisem/MESHER
+```
+
+You can instead select a built-in model such as `BACKGROUND_MODEL ak135`.
+Build and run the mesh from `MESHER`:
+
+```bash
+cd ../axisem/MESHER
+./submit.csh
+```
+
+Wait until `OUTPUT` reports `DONE WITH MESHER`. Move the completed mesh to the
+solver, then set `MESHNAME` in `SOLVER/inparam_basic` to the same name:
+
+```bash
+./movemesh.csh my_mesh
+```
+
+The solver is a separate Fortran program. Continue with the
+[solver and coupling workflow](workflow.md) after the mesh is available.
+AxiSEMLib's Python installation does not build the solver.
 
 ## Build these docs
 
