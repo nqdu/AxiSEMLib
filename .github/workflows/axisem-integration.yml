@@ -1,0 +1,79 @@
+name: AxiSEM seismogram integration
+
+on:
+  push:
+    branches: [devel]
+    paths:
+      - .github/workflows/axisem-integration.yml
+      - ci/axisem_seismogram.py
+      - axisemlib/**
+      - pyproject.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seismograms:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      NUMBA_NUM_THREADS: "1"
+    steps:
+      - name: Check out AxiSEMLib
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install AxiSEM build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y csh gfortran make openmpi-bin libopenmpi-dev libnetcdf-dev libnetcdff-dev
+
+      - name: Clone AxiSEM AxiSEMLib branch
+        run: git clone --depth 1 --branch AxiSEMLib https://github.com/nqdu/axisem.git ../axisem
+
+      - name: Copy templates and configure the 50 s moment run
+        run: python ci/axisem_seismogram.py configure ../axisem
+
+      - name: Install AxiSEMLib and generate the external model
+        run: |
+          python -m pip install -e .
+          axisemlib smooth --model ak135 --output-dir ../axisem/MESHER --no-plot
+
+      - name: Build and run the 50 s mesh
+        run: python ci/axisem_seismogram.py mesh ../axisem
+
+      - name: Build and run four moment simulations
+        run: python ci/axisem_seismogram.py solver ../axisem
+
+      - name: Compare post_processing.csh with axisemlib seismogram
+        run: python ci/axisem_seismogram.py compare ../axisem
+
+      - name: Collect solver and comparison logs
+        if: always()
+        run: |
+          mkdir -p ci-artifacts
+          for source in \
+            ../axisem/MESHER/OUTPUT \
+            ../axisem/SOLVER/ak135.ci50-moment/*/OUTPUT_* \
+            ../axisem/SOLVER/ak135.ci50-moment/Data_Postprocessing/OUTPUT_postprocessing \
+            ../axisem/SOLVER/ak135.ci50-moment/seismogram-comparison.txt; do
+            if [ -f "$source" ]; then
+              cp "$source" ci-artifacts/
+            fi
+          done
+
+      - name: Upload solver and comparison logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: axisem-seismogram-logs
+          if-no-files-found: ignore
+          retention-days: 7
+          path: ci-artifacts/

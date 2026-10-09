@@ -9,5 +9,6 @@
         "/opt/openmpi-5.0.6//lib",
     ],
     "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda"
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "cmake.sourceDirectory": "/Users/nqdu/code/python/AxiSEMLib/bak"
 }

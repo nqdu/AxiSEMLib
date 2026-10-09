@@ -1,0 +1,5 @@
+recursive-include doc *.md *.py *.pdf
+recursive-include EXAMPLES *.yaml
+prune axisem
+prune bak
+prune benchmarks

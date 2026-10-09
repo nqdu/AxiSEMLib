@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "axisemlib"
+version = "3.0.0"
+description = "AxiSEM wavefield processing and SPECFEM coupling"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "LGPL-3.0-or-later"
+license-files = ["license.md"]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "numba>=0.58",
+    "h5py>=3.8",
+    "pyproj>=3.4",
+    "mpi4py>=3.1",
+    "PyYAML>=6",
+    "tqdm>=4.64",
+    "matplotlib>=3.5",
+]
+
+[project.optional-dependencies]
+docs = ["sphinx>=7", "myst-parser>=2", "sphinx-rtd-theme>=2"]
+
+[project.scripts]
+axisemlib = "axisemlib.cli:main"
+
+[project.urls]
+Repository = "https://github.com/nqdu/AxiSEMLib"
+Documentation = "https://nqdu.github.io/AxiSEMLib/"
+
+[tool.setuptools.packages.find]
+include = ["axisemlib*"]
