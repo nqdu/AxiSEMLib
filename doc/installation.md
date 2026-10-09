@@ -19,6 +19,12 @@ cd axisem
 ./copytemplates.sh
 ```
 
+## Configure Macros
+
+Before building the mesher or solver, edit `make_axisem.macros` in the AxiSEM
+checkout. Set the compiler and NetCDF paths for your machine, including
+`USE_NETCDF = true` and the correct `NETCDF_PATH`.
+
 ## Install the Python package
 
 Return to the parent directory, clone AxiSEMLib beside the `axisem` checkout,
@@ -45,9 +51,7 @@ Wavefield transposition also needs `h5repack` on `PATH`.
 
 ## Build the AxiSEM mesh
 
-Set `USE_NETCDF = true` and the correct `NETCDF_PATH` in
-`../axisem/make_axisem.macros`, then
-configure `../axisem/MESHER/inparam_mesh` for the model, period, and processor
+Configure `../axisem/MESHER/inparam_mesh` for the model, period, and processor
 count. The copied mesher template selects an external `ak135.smooth.bm` file.
 Generate it from the AxiSEMLib checkout:
 
@@ -63,12 +67,15 @@ cd ../axisem/MESHER
 ./submit.csh
 ```
 
-Wait until `OUTPUT` reports `DONE WITH MESHER`. Move the completed mesh to the
-solver, then set `MESHNAME` in `SOLVER/inparam_basic` to the same name:
+Wait until `OUTPUT` reports `DONE WITH MESHER`, then move the completed mesh
+to the solver:
 
 ```bash
 ./movemesh.csh my_mesh
+cd ../SOLVER
 ```
+
+Set `MESHNAME` in `inparam_basic` to `my_mesh`.
 
 The solver is a separate Fortran program. Continue with the
 [solver and coupling workflow](workflow.md) after the mesh is available.
@@ -76,7 +83,10 @@ AxiSEMLib's Python installation does not build the solver.
 
 ## Build these docs
 
+To build the docs, return to the AxiSEMLib checkout:
+
 ```bash
+cd ../../AxiSEMLib
 python -m pip install -e ".[docs]"
 python -m sphinx -b html -W --keep-going doc doc/_build/html
 ```

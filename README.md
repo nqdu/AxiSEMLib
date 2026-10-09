@@ -10,7 +10,8 @@ builds SPECFEM coupling files.
 
 Follow the [installation guide](doc/installation.md) to clone the
 [AxiSEM solver](https://github.com/nqdu/axisem), run `copytemplates.sh`,
-generate a mesh, and install this package. Python 3.10 or newer is required.
+configure the build macros, install this package, and generate a mesh.
+Python 3.10 or newer is required.
 From the AxiSEMLib checkout:
 
 ```bash

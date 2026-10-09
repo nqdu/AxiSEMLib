@@ -1,25 +1,26 @@
 # AxiSEM solver and coupling workflow
 
 Start with the [installation guide](installation.md) to clone the AxiSEM
-solver and install AxiSEMLib. The commands below assume sibling `axisem` and
-`AxiSEMLib` checkouts unless another working directory is stated.
+solver, install AxiSEMLib, and build the first mesh. The paths below assume
+sibling `axisem` and `AxiSEMLib` checkouts.
 
 ## Prepare AxiSEM Mesh
 
-Follow the [installation guide](installation.md) to copy the solver templates,
-configure `make_axisem.macros`, and install AxiSEMLib first.
+The [installation guide](installation.md) covers the first mesh, including
+template copying and [build macro setup](installation.md#configure-macros).
+To build another mesh, start from AxiSEM's `SOLVER` directory:
 
-1.  **Configure Mesher:** Edit `../axisem/MESHER/inparam_mesh`.
+1.  **Configure Mesher:** Edit `../MESHER/inparam_mesh`.
     * Set `DOMINANT_PERIOD` and the number of slices.
     * **Note:** Ensure the dominant period is slightly shorter than the minimum period used in the SEM (refer to `output_generate_databases.txt` in SPECFEM).
     * The copied template selects `BACKGROUND_MODEL external` and
       `EXT_MODEL ak135.smooth.bm`. Put that file in `MESHER`, or use a built-in
       model such as `BACKGROUND_MODEL ak135`.
     * To generate a smoothed **ak135/PREM** model, use
-      [axisemlib smooth](cli.md#axisemlib-smooth) from the AxiSEMLib checkout:
+      [axisemlib smooth](cli.md#axisemlib-smooth):
 
         ```bash
-        axisemlib smooth --model ak135 --output-dir ../axisem/MESHER
+        axisemlib smooth --model ak135 --output-dir ../MESHER
         ```
 
       Configure the generated file as an external model:
@@ -32,7 +33,7 @@ configure `make_axisem.macros`, and install AxiSEMLib first.
 2.  **Generate Mesh:** Run the mesher:
 
     ```bash
-    cd ../axisem/MESHER
+    cd ../MESHER
     ./submit.csh
     ```
 
@@ -41,10 +42,10 @@ configure `make_axisem.macros`, and install AxiSEMLib first.
 
     ```bash
     ./movemesh.csh <mesh_name>
-    cd ../../AxiSEMLib
+    cd ../SOLVER
     ```
-    The mesh files will be moved to `../axisem/SOLVER/MESHES/<mesh_name>`.
-    Set `MESHNAME` in `../axisem/SOLVER/inparam_basic` to `<mesh_name>`.
+    The mesh files will be moved to `SOLVER/MESHES/<mesh_name>`.
+    Set `MESHNAME` in `inparam_basic` to `<mesh_name>`.
 
 ---
 
@@ -105,18 +106,18 @@ prepares the input files for one event at a time; see the
 
 ## Run AxiSEM Simulation
 
-Run the solver from `../axisem/SOLVER` after preparing the mesh and the input
+Run the solver from `SOLVER` after preparing the mesh and the input
 files described above. If `SAVE_BDRY_FACES` is enabled, place
 `boundary_faces.dat` there first. `submit.csh` builds the solver, creates a
 new run directory, copies the inputs, and starts the simulation. The run
 directory name must not already exist.
 
-Use `axisemlib merge` to construct `../axisem/SOLVER/boundary_faces.dat` from
+Use `axisemlib merge` to construct `boundary_faces.dat` from
 SPECFEM's `DATABASES_MPI` files:
 
 ```bash
-axisemlib merge cube2sph SPECFEM_DB ../axisem/SOLVER/boundary_faces.dat
-axisemlib merge cart SPECFEM_DB ../axisem/SOLVER/boundary_faces.dat --utm-zone 10
+axisemlib merge cube2sph SPECFEM_DB boundary_faces.dat
+axisemlib merge cart SPECFEM_DB boundary_faces.dat --utm-zone 10
 ```
 
 For `cube2sph`, the script reads `proc??????_wavefield_discontinuity_faces`
@@ -138,15 +139,6 @@ script rejects files whose data rows are not a multiple of 25. Its
 `merge_surfaces(...)` return value maps each `iface` to
 `(processor_number, local_face_index)`. `submit.csh` copies
 `boundary_faces.dat` into the run directory when `SAVE_BDRY_FACES` is enabled.
-
-For one run on the local machine:
-
-```bash
-cd ../axisem/SOLVER
-./submit.csh ak135.my_event
-```
-
-Local runs start in the background; check the `OUTPUT_*` files in the new run directory for progress. For a scheduler, adapt `submit.csh` to your cluster.
 
 To prepare one event, run from the AxiSEM `SOLVER` directory:
 
@@ -177,6 +169,9 @@ the simulation. To run the prepared event, call `submit.csh` explicitly:
 ```bash
 ./submit.csh ak135.SKS_1
 ```
+
+Local runs start in the background; check the `OUTPUT_*` files in the new run
+directory for progress. For a scheduler, adapt `submit.csh` to your cluster.
 
 To create receiver seismograms directly from the `Seismograms` group in each
 `axisem_output.nc4`, including runs with `SAVE_BDRY_FACES` enabled, run:
