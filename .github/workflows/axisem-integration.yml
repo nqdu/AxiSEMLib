@@ -55,6 +55,20 @@ jobs:
       - name: Compare post_processing.csh with axisemlib seismogram
         run: python ci/axisem_seismogram.py compare ../axisem
 
+      - name: Collect solver and comparison logs
+        if: always()
+        run: |
+          mkdir -p ci-artifacts
+          for source in \
+            ../axisem/MESHER/OUTPUT \
+            ../axisem/SOLVER/ak135.ci50-moment/*/OUTPUT_* \
+            ../axisem/SOLVER/ak135.ci50-moment/Data_Postprocessing/OUTPUT_postprocessing \
+            ../axisem/SOLVER/ak135.ci50-moment/seismogram-comparison.txt; do
+            if [ -f "$source" ]; then
+              cp "$source" ci-artifacts/
+            fi
+          done
+
       - name: Upload solver and comparison logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -62,8 +76,4 @@ jobs:
           name: axisem-seismogram-logs
           if-no-files-found: ignore
           retention-days: 7
-          path: |
-            ../axisem/MESHER/OUTPUT
-            ../axisem/SOLVER/ak135.ci50-moment/*/OUTPUT_*
-            ../axisem/SOLVER/ak135.ci50-moment/Data_Postprocessing/OUTPUT_postprocessing
-            ../axisem/SOLVER/ak135.ci50-moment/seismogram-comparison.txt
+          path: ci-artifacts/

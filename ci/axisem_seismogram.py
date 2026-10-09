@@ -157,8 +157,26 @@ def compare(axisem: Path) -> None:
     }.items():
         set_parameter(params, name, value)
 
-    run_command("csh", "post_processing.csh", cwd=run)
+    print(f"Running in {run}: csh post_processing.csh", flush=True)
+    postprocess = subprocess.run(
+        ("csh", "post_processing.csh"), cwd=run, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+    )
+    print(postprocess.stdout, end="", flush=True)
     legacy_dir = run / "Data_Postprocessing" / "SEISMOGRAMS"
+    postprocess_log = run / "Data_Postprocessing" / "OUTPUT_postprocessing"
+    if postprocess.returncode:
+        # The shell script can fail in its final usage example because recname
+        # is unset, after xpost_processing has finished writing the traces.
+        finished = postprocess_log.is_file() and (
+            "DONE with seismogram post processing!" in postprocess_log.read_text()
+        )
+        if not (
+            postprocess.returncode == 1
+            and "recname: Undefined variable." in postprocess.stdout
+            and finished
+        ):
+            raise subprocess.CalledProcessError(postprocess.returncode, postprocess.args)
     if not list(legacy_dir.glob("*_disp_post_mij_conv*_N.dat")):
         raise RuntimeError("post_processing.csh produced no NEZ seismograms")
 
